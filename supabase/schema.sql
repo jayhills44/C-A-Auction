@@ -1,0 +1,1 @@
+-- DEPRECATED. This project now uses Firebase Firestore. See firestore.rules and SETUP.md.

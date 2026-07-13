@@ -1,0 +1,16 @@
+rules_version = '2';
+// All WRITES happen through the Next.js API routes using the Firebase Admin
+// SDK, which bypasses these rules. Public clients can only READ.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /leagues/{leagueId} {
+      allow read: if true;
+      allow write: if false;
+
+      match /{sub=**} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+  }
+}
