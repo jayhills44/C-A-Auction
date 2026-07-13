@@ -9,18 +9,6 @@ const config = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Debug: this shows up in browser console. Safe because NEXT_PUBLIC_ values are public anyway.
-if (typeof window !== "undefined") {
-  // eslint-disable-next-line no-console
-  console.log("[FirebaseDebug] config values embedded in bundle:", {
-    hasApiKey: !!config.apiKey,
-    apiKeyStart: (config.apiKey || "").slice(0, 10),
-    authDomain: config.authDomain,
-    projectId: config.projectId,
-    appIdStart: (config.appId || "").slice(0, 20),
-  });
-}
-
 let app: FirebaseApp;
 let db: Firestore;
 
