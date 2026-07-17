@@ -2,5 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body { background: #0b0f17; color: #f3f4f6; }
+/* Crown & Anchor Veterans League palette
+   Cream page background for the auction side.
+   Warm pub gold accents. Deep navy/black for the rosters side. */
+html, body {
+  background: #f5efe0;   /* warm parchment */
+  color: #1a1410;         /* rich near-black */
+}
+
 * { -webkit-tap-highlight-color: transparent; }
+
+/* Serif display font for headings — evokes pub signage. */
+.pub-display {
+  font-family: Georgia, "Playfair Display", "Times New Roman", serif;
+  letter-spacing: 0.01em;
+}

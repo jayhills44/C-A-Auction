@@ -2,8 +2,9 @@ import "./globals.css";
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "Fantasy Football Live Auction",
-  description: "Real-time 12-team fantasy football auction draft",
+  title: "Crown & Anchor Veterans League — Live Auction",
+  description: "The C&A Veterans League fantasy football live auction",
+  icons: { icon: "/crown-anchor-logo.jpg" },
 };
 export const viewport: Viewport = {
   width: "device-width",

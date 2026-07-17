@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { firestore } from "@/lib/firebaseClient";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import type { League, Team } from "@/lib/types";
@@ -38,22 +39,26 @@ export default function Lobby({ league }: { league: League }) {
   return (
     <main className="mx-auto max-w-md p-6">
       <div className="text-center mb-6">
-        <div className="text-zinc-400 text-sm">Room Code</div>
-        <div className="text-5xl font-mono tracking-widest font-bold mt-1">{league.roomCode}</div>
-        <div className="text-zinc-500 text-sm mt-2">Share this code with your league members.</div>
+        <div className="inline-block ring-4 ring-amber-500/40 rounded-full p-1 bg-white shadow-lg mb-3">
+          <Image src="/crown-anchor-logo.jpg" alt="C&A" width={80} height={80} className="rounded-full" priority />
+        </div>
+        <h1 className="pub-display text-xl font-bold text-stone-900">Crown &amp; Anchor Veterans League</h1>
+        <div className="text-stone-500 text-sm mt-3">Room Code</div>
+        <div className="pub-display text-5xl font-mono tracking-widest font-bold mt-1 text-amber-800">{league.roomCode}</div>
+        <div className="text-stone-500 text-sm mt-2">Share this code with your league members.</div>
       </div>
 
-      <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-4">
-        <h2 className="font-semibold mb-3">Teams ({teams.length}/12)</h2>
+      <div className="bg-white rounded-2xl border-2 border-amber-500/30 p-4 shadow-lg">
+        <h2 className="pub-display font-bold text-stone-900 mb-3">Teams ({teams.length}/12)</h2>
         <div className="space-y-2">
           {teams.map((t, i) => (
-            <div key={t.id} className="flex items-center bg-zinc-800 rounded-lg px-3 py-2">
-              <div className="w-7 h-7 rounded-full bg-zinc-700 grid place-content-center text-xs">{i + 1}</div>
-              <div className="ml-3 font-medium">{t.name}</div>
-              <div className="ml-auto text-xs text-zinc-400">${league.budget}</div>
+            <div key={t.id} className="flex items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <div className="w-7 h-7 rounded-full bg-amber-700 text-white grid place-content-center text-xs font-semibold">{i + 1}</div>
+              <div className="ml-3 font-medium text-stone-900">{t.name}</div>
+              <div className="ml-auto text-xs text-stone-600 font-mono">${league.budget}</div>
             </div>
           ))}
-          {teams.length === 0 && <div className="text-zinc-500 text-sm">Waiting for teams to join…</div>}
+          {teams.length === 0 && <div className="text-stone-500 text-sm">Waiting for teams to join…</div>}
         </div>
       </div>
 
@@ -62,15 +67,15 @@ export default function Lobby({ league }: { league: League }) {
           <button
             onClick={startAuction}
             disabled={starting || teams.length === 0}
-            className="w-full bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white font-semibold py-3 rounded-lg"
+            className="w-full bg-emerald-700 hover:bg-emerald-600 disabled:bg-stone-400 text-white font-semibold py-3 rounded-lg shadow-md"
           >
             {starting ? "Starting…" : `Start Auction`}
           </button>
-          {err && <div className="text-red-400 text-sm mt-2">{err}</div>}
-          <p className="text-xs text-zinc-500 mt-3 text-center">Only you (the commissioner) see this button.</p>
+          {err && <div className="text-red-700 text-sm mt-2">{err}</div>}
+          <p className="text-xs text-stone-500 mt-3 text-center">Only you (the commissioner) see this button.</p>
         </div>
       ) : (
-        <p className="text-center text-zinc-400 mt-6 text-sm">Waiting for the commissioner to start the auction…</p>
+        <p className="text-center text-stone-600 mt-6 text-sm">Waiting for the commissioner to start the auction…</p>
       )}
     </main>
   );

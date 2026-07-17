@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { firestore } from "@/lib/firebaseClient";
 import { collection, onSnapshot, orderBy, query, limit } from "firebase/firestore";
 import { positionColor } from "@/lib/utils";
@@ -445,22 +446,29 @@ export default function Auction({ league }: { league: League }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between text-xs text-zinc-400 mb-3">
-        <div>Room <span className="font-mono text-zinc-200">{league.roomCode}</span> · {league.name}</div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => { setSoundOn((v) => !v); ensureCtx(); }}
-            className="text-zinc-400 hover:text-zinc-200"
-            title="Toggle sound"
-          >
-            {soundOn ? "🔊" : "🔇"}
-          </button>
-          <span>{soldPlayers.length}/{totalPlayers} sold</span>
+      <header className="flex items-center gap-3 mb-4">
+        <div className="w-14 h-14 rounded-full bg-white p-0.5 ring-4 ring-amber-500/40 shadow-md shrink-0">
+          <Image src="/crown-anchor-logo.jpg" alt="C&A" width={54} height={54} className="rounded-full" priority />
         </div>
-      </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="pub-display text-lg md:text-xl font-bold text-stone-900 truncate">Crown &amp; Anchor Veterans League</h1>
+          <div className="text-xs text-stone-500">
+            Room <span className="font-mono text-stone-900">{league.roomCode}</span>
+            <span className="mx-1.5">·</span>
+            {soldPlayers.length}/{totalPlayers} sold
+          </div>
+        </div>
+        <button
+          onClick={() => { setSoundOn((v) => !v); ensureCtx(); }}
+          className="text-stone-500 hover:text-stone-800 text-xl shrink-0"
+          title="Toggle sound"
+        >
+          {soundOn ? "🔊" : "🔇"}
+        </button>
+      </header>
 
       {league.paused && (
-        <div className="mb-3 bg-yellow-900/60 border border-yellow-700 rounded-lg px-3 py-2 text-center text-yellow-200 text-sm font-semibold">
+        <div className="mb-3 bg-amber-100 border-2 border-amber-500 rounded-lg px-3 py-2 text-center text-amber-900 text-sm font-semibold">
           ⏸ Auction paused by commissioner
         </div>
       )}
@@ -470,56 +478,56 @@ export default function Auction({ league }: { league: League }) {
         {/* Left: auction machine */}
         <div>
           {phase === "pause" ? (
-            <div className="bg-fuchsia-900/40 rounded-3xl border-2 border-fuchsia-600/50 p-6 text-center min-h-[220px] flex flex-col justify-center">
-              <div className="text-xs text-fuchsia-300 uppercase tracking-widest">Get ready</div>
-              <div className="text-3xl md:text-4xl font-black mt-2">Next player coming up</div>
-              <div className="text-sm text-zinc-300 mt-3">{pauseSecsLeft}s…</div>
+            <div className="bg-amber-100 rounded-3xl border-2 border-amber-500 p-6 text-center min-h-[220px] flex flex-col justify-center shadow-md">
+              <div className="text-xs text-amber-800 uppercase tracking-widest font-semibold">Get ready</div>
+              <div className="pub-display text-3xl md:text-4xl font-black mt-2 text-stone-900">Next player coming up</div>
+              <div className="text-sm text-stone-600 mt-3">{pauseSecsLeft}s…</div>
             </div>
           ) : phase === "reveal" && currentPlayer ? (
-            <div className="bg-emerald-900/40 rounded-3xl border-2 border-emerald-500/60 p-6 text-center">
+            <div className="bg-emerald-100 rounded-3xl border-2 border-emerald-600 p-6 text-center shadow-md">
               <div className="flex items-center justify-center gap-2 mb-2">
                 <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${positionColor(currentPlayer.position)}`}>
                   {currentPlayer.position}
                 </span>
-                {currentPlayer.nflTeam && <span className="text-xs text-zinc-300">{currentPlayer.nflTeam}</span>}
+                {currentPlayer.nflTeam && <span className="text-xs text-emerald-900 font-semibold">{currentPlayer.nflTeam}</span>}
               </div>
-              <h2 className="text-4xl font-black leading-tight">{currentPlayer.name}</h2>
-              <div className="text-xs text-emerald-300 uppercase tracking-widest mt-4">Ready…</div>
+              <h2 className="pub-display text-4xl font-black leading-tight text-stone-900">{currentPlayer.name}</h2>
+              <div className="text-xs text-emerald-800 uppercase tracking-widest mt-4 font-semibold">Ready…</div>
             </div>
           ) : currentPlayer ? (
-            <div className="bg-zinc-900 rounded-3xl border border-zinc-800 p-5 text-center">
+            <div className="bg-white rounded-3xl border-2 border-amber-500/40 p-5 text-center shadow-lg">
               <div className="flex items-center justify-center gap-2 mb-2">
                 <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${positionColor(currentPlayer.position)}`}>
                   {currentPlayer.position}
                 </span>
-                {currentPlayer.nflTeam && <span className="text-xs text-zinc-400">{currentPlayer.nflTeam}</span>}
+                {currentPlayer.nflTeam && <span className="text-xs text-stone-500 font-medium">{currentPlayer.nflTeam}</span>}
               </div>
-              <h2 className="text-3xl font-bold leading-tight">{currentPlayer.name}</h2>
+              <h2 className="pub-display text-3xl font-bold leading-tight text-stone-900">{currentPlayer.name}</h2>
 
               <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="bg-zinc-800 rounded-xl py-3">
-                  <div className="text-xs text-zinc-400">Current bid</div>
-                  <div className="text-3xl font-bold">${displayedBid}</div>
-                  <div className="text-xs text-zinc-400 mt-1">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl py-3">
+                  <div className="text-xs text-stone-600">Current bid</div>
+                  <div className="text-3xl font-bold text-stone-900">${displayedBid}</div>
+                  <div className="text-xs text-stone-500 mt-1">
                     {displayedWinner ? teamById(displayedWinner)?.name : "—"}
                   </div>
                 </div>
-                <div className={`rounded-xl py-3 ${league.paused ? "bg-yellow-900/40" : secsLeft <= 3 ? "bg-red-900/60" : "bg-zinc-800"}`}>
-                  <div className="text-xs text-zinc-400">Timer</div>
-                  <div className="text-3xl font-bold">{secsLeft}s</div>
+                <div className={`rounded-xl py-3 border ${league.paused ? "bg-amber-100 border-amber-400" : secsLeft <= 3 ? "bg-red-100 border-red-400" : "bg-stone-100 border-stone-300"}`}>
+                  <div className="text-xs text-stone-600">Timer</div>
+                  <div className={`text-3xl font-bold ${secsLeft <= 3 ? "text-red-700" : "text-stone-900"}`}>{secsLeft}s</div>
                 </div>
               </div>
 
               {myTeam ? (
                 <div className="mt-5">
-                  <div className="text-xs text-zinc-400">Your budget: <span className="text-white font-bold">${myTeam.budgetLeft}</span></div>
+                  <div className="text-xs text-stone-600">Your budget: <span className="text-stone-900 font-bold">${myTeam.budgetLeft}</span></div>
                   <div className="mt-2 flex gap-2">
                     <button onClick={() => placeBid(minNextBid)} disabled={bidding || league.paused}
-                      className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-[.98] transition disabled:bg-zinc-700 py-4 rounded-lg font-semibold text-lg">
+                      className="flex-1 bg-amber-700 hover:bg-amber-600 active:scale-[.98] transition disabled:bg-stone-400 text-white py-4 rounded-lg font-semibold text-lg shadow">
                       Bid ${minNextBid}
                     </button>
                     <button onClick={() => placeBid(Math.max(minNextBid, displayedBid + 5))} disabled={bidding || league.paused}
-                      className="flex-1 bg-blue-700 hover:bg-blue-600 active:scale-[.98] transition disabled:bg-zinc-700 py-4 rounded-lg font-semibold text-lg">
+                      className="flex-1 bg-amber-800 hover:bg-amber-700 active:scale-[.98] transition disabled:bg-stone-400 text-white py-4 rounded-lg font-semibold text-lg shadow">
                       +$5
                     </button>
                   </div>
@@ -528,22 +536,22 @@ export default function Auction({ league }: { league: League }) {
                       type="number" min={minNextBid} value={myBid}
                       onChange={(e) => setMyBid(e.target.value)}
                       placeholder={`Custom (min $${minNextBid})`}
-                      className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-3 outline-none focus:border-blue-500"
+                      className="flex-1 rounded-lg bg-stone-50 border-2 border-stone-300 px-3 py-3 outline-none focus:border-amber-600 text-stone-900"
                     />
                     <button onClick={() => placeBid(Number(myBid))} disabled={bidding || !myBid || league.paused}
-                      className="px-4 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 rounded-lg font-semibold">
+                      className="px-4 bg-emerald-700 hover:bg-emerald-600 disabled:bg-stone-400 text-white rounded-lg font-semibold shadow">
                       Bid
                     </button>
                   </div>
-                  {bidErr && <div className="mt-2 text-red-400 text-sm">{bidErr}</div>}
+                  {bidErr && <div className="mt-2 text-red-700 text-sm font-medium">{bidErr}</div>}
                 </div>
               ) : (
-                <p className="mt-5 text-zinc-400 text-sm">Spectating — you haven't joined as a team on this device.</p>
+                <p className="mt-5 text-stone-500 text-sm">Spectating — you haven't joined as a team on this device.</p>
               )}
             </div>
           ) : (
-            <div className="bg-zinc-900 rounded-3xl border border-zinc-800 p-6 text-center min-h-[220px] flex items-center justify-center">
-              <p>Drawing next player…</p>
+            <div className="bg-white rounded-3xl border-2 border-amber-500/40 p-6 text-center min-h-[220px] flex items-center justify-center shadow-lg">
+              <p className="text-stone-600">Drawing next player…</p>
             </div>
           )}
 
@@ -562,33 +570,33 @@ export default function Auction({ league }: { league: League }) {
                   {advancing ? "Advancing…" : "Draw Next Player"}
                 </button>
               </div>
-              <p className="text-[10px] text-zinc-500 text-center">
+              <p className="text-[10px] text-stone-500 text-center">
                 Commissioner controls · Pause blocks new bids · Draw Next only after timer expires
               </p>
             </div>
           )}
 
           <section className="mt-6">
-            <h3 className="text-sm font-semibold text-zinc-300 mb-2">Recent bids</h3>
+            <h3 className="pub-display text-base font-bold text-stone-800 mb-2">Recent bids</h3>
             <div className="space-y-1.5 max-h-40 overflow-y-auto">
               {bids.slice(0, 12).map((b) => {
                 const t = teamById(b.teamId);
                 const p = players.find((x) => x.id === b.playerId);
                 return (
-                  <div key={b.id} className="text-sm flex justify-between bg-zinc-900/60 rounded px-3 py-1.5">
-                    <span className="truncate">{t?.name || "?"} <span className="text-zinc-500">→</span> {p?.name || "?"}</span>
-                    <span className="font-mono text-green-400">${b.amount}</span>
+                  <div key={b.id} className="text-sm flex justify-between bg-white/70 border border-stone-200 rounded px-3 py-1.5">
+                    <span className="truncate text-stone-800">{t?.name || "?"} <span className="text-stone-400">→</span> {p?.name || "?"}</span>
+                    <span className="font-mono text-emerald-700 font-semibold">${b.amount}</span>
                   </div>
                 );
               })}
-              {bids.length === 0 && <div className="text-zinc-500 text-sm">No bids yet.</div>}
+              {bids.length === 0 && <div className="text-stone-500 text-sm">No bids yet.</div>}
             </div>
           </section>
         </div>
 
-        {/* Right: team rosters by position slot */}
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-300 mb-2">Team Rosters</h3>
+        {/* Right: team rosters (dark panel) */}
+        <div className="bg-zinc-950 -mx-4 lg:mx-0 lg:rounded-2xl p-4 text-zinc-100 shadow-xl border-2 border-amber-500/20">
+          <h3 className="pub-display text-base font-bold text-amber-400 mb-3">Team Rosters</h3>
           <div className="grid sm:grid-cols-2 gap-2">
             {teams.map((t) => {
               const won = soldPlayers.filter((p) => p.soldTo === t.id);

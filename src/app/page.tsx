@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 export default function HomePage() {
@@ -28,51 +29,56 @@ export default function HomePage() {
       setError(json.error || "Could not join");
       return;
     }
-    // Save credentials locally so this device is identified as that team.
     localStorage.setItem(`team:${json.roomCode}`, JSON.stringify({ teamId: json.teamId, token: json.token }));
     router.push(`/league/${json.roomCode}`);
   }
 
   return (
-    <main className="mx-auto max-w-md p-6 pt-16">
-      <h1 className="text-3xl font-bold mb-2">🏈 Live Auction</h1>
-      <p className="text-zinc-400 mb-8">Fantasy football auction draft, in real time.</p>
+    <main className="mx-auto max-w-md p-6 pt-10">
+      <div className="text-center mb-6">
+        <div className="inline-block ring-4 ring-amber-500/40 rounded-full p-1 bg-white shadow-lg">
+          <Image src="/crown-anchor-logo.jpg" alt="Crown & Anchor" width={110} height={110} className="rounded-full" priority />
+        </div>
+        <h1 className="pub-display text-3xl font-bold mt-4 text-stone-900">Crown &amp; Anchor</h1>
+        <p className="pub-display text-lg text-amber-800 tracking-wide">Veterans League</p>
+        <p className="text-stone-600 text-sm mt-1">Fantasy football live auction</p>
+      </div>
 
-      <div className="bg-zinc-900 rounded-2xl p-6 space-y-4 border border-zinc-800">
-        <h2 className="text-lg font-semibold">Join a league</h2>
+      <div className="bg-white rounded-2xl p-6 space-y-4 border-2 border-amber-500/30 shadow-lg">
+        <h2 className="pub-display text-xl font-bold text-stone-900">Join the auction</h2>
         <label className="block">
-          <span className="text-sm text-zinc-300">Room code</span>
+          <span className="text-sm text-stone-700 font-medium">Room code</span>
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="ABC123"
             maxLength={6}
-            className="mt-1 w-full rounded-lg bg-zinc-800 border border-zinc-700 px-4 py-3 text-2xl tracking-widest text-center font-mono uppercase outline-none focus:border-blue-500"
+            className="mt-1 w-full rounded-lg bg-stone-50 border-2 border-stone-300 px-4 py-3 text-2xl tracking-widest text-center font-mono uppercase outline-none focus:border-amber-600 text-stone-900"
           />
         </label>
         <label className="block">
-          <span className="text-sm text-zinc-300">Your team name</span>
+          <span className="text-sm text-stone-700 font-medium">Your team name</span>
           <input
             value={team}
             onChange={(e) => setTeam(e.target.value)}
             placeholder="Jay's Juggernauts"
             maxLength={40}
-            className="mt-1 w-full rounded-lg bg-zinc-800 border border-zinc-700 px-4 py-3 outline-none focus:border-blue-500"
+            className="mt-1 w-full rounded-lg bg-stone-50 border-2 border-stone-300 px-4 py-3 outline-none focus:border-amber-600 text-stone-900"
           />
         </label>
-        {error && <div className="text-red-400 text-sm">{error}</div>}
+        {error && <div className="text-red-600 text-sm">{error}</div>}
         <button
           onClick={join}
           disabled={loading}
-          className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 text-white font-semibold py-3 rounded-lg"
+          className="w-full bg-amber-700 hover:bg-amber-600 disabled:bg-stone-400 text-white font-semibold py-3 rounded-lg shadow-md"
         >
           {loading ? "Joining…" : "Join League"}
         </button>
       </div>
 
-      <div className="mt-8 text-center">
-        <Link href="/create" className="text-blue-400 hover:underline">
-          Are you the commissioner? Create a league →
+      <div className="mt-6 text-center">
+        <Link href="/create" className="text-amber-800 hover:text-amber-900 hover:underline font-medium">
+          Commissioner? Create a league →
         </Link>
       </div>
     </main>
