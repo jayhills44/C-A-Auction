@@ -24,6 +24,7 @@ export async function POST(req: Request) {
       if (!lSnap.exists) return { err: "League missing" };
       const l = lSnap.data() as any;
       if (l.status !== "active") return { err: "Auction is not active" };
+      if (l.paused) return { err: "Auction is paused" };
       if (!l.currentPlayer) return { err: "No player up for bid" };
       if (l.timerEndsAt && new Date(l.timerEndsAt) <= new Date())
         return { err: "Bidding has closed for this player" };

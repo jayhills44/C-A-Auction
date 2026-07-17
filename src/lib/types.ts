@@ -15,6 +15,8 @@ export interface League {
   currentBid: number;
   currentWinner: string | null; // teamId
   timerEndsAt: string | null;   // ISO string
+  paused: boolean;
+  pausedAt: string | null;      // ISO string when paused (used to freeze timer)
   commissionerId: string;
   createdAt: string;
 }
