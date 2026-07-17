@@ -12,9 +12,11 @@ function ensureCtx(): AudioContext | null {
   if (!audioCtx) {
     const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!AC) return null;
-    audioCtx = new AC();
+    audioCtx = new AC() as AudioContext;
   }
-  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
   return audioCtx;
 }
 function beep(freq: number, durMs = 180, vol = 0.35) {
