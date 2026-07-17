@@ -57,9 +57,9 @@ export default function Auction({ league }: { league: League }) {
   const [optCurrentBid, setOptCurrentBid] = useState<number | null>(null);
   const [optWinner, setOptWinner] = useState<string | null>(null);
   const [optPlayerId, setOptPlayerId] = useState<string | null>(null);
+  const [optTimerEndsAt, setOptTimerEndsAt] = useState<string | null>(null);
 
   const advancedRef = useRef<string | null>(null);
-  const flashedAtRef = useRef<{ [playerId: string]: Set<number> }>({});
   const lastSoldRef = useRef<string | null>(null);
 
   const isCommish =
@@ -99,11 +99,13 @@ export default function Auction({ league }: { league: League }) {
       ) {
         setOptCurrentBid(null);
         setOptWinner(null);
+        setOptTimerEndsAt(null);
       }
     } else {
       setOptCurrentBid(null);
       setOptWinner(null);
       setOptPlayerId(null);
+      setOptTimerEndsAt(null);
     }
   }, [league.currentPlayer, league.currentBid, league.currentWinner, optPlayerId, optCurrentBid, optWinner]);
 
@@ -123,41 +125,54 @@ export default function Auction({ league }: { league: League }) {
   // Timer freezes at pausedAt while league is paused.
   const effectiveNow =
     league.paused && league.pausedAt ? new Date(league.pausedAt).getTime() : now;
-  const secsLeft = league.timerEndsAt
-    ? Math.max(0, Math.ceil((new Date(league.timerEndsAt).getTime() - effectiveNow) / 1000))
+  // Use my optimistic end time if it's more recent than the server's (my own bid).
+  const effectiveEndsAt = (() => {
+    const server = league.timerEndsAt ? new Date(league.timerEndsAt).getTime() : 0;
+    const opt = optTimerEndsAt && optPlayerId === league.currentPlayer ? new Date(optTimerEndsAt).getTime() : 0;
+    const chosen = Math.max(server, opt);
+    return chosen > 0 ? chosen : null;
+  })();
+  const secsLeft = effectiveEndsAt
+    ? Math.max(0, Math.ceil((effectiveEndsAt - effectiveNow) / 1000))
     : 0;
   const timerExpired = !!league.timerEndsAt && new Date(league.timerEndsAt).getTime() <= now;
   const minNextBid = displayedBid + 1;
 
-  // -------- Visual flash + beep at 3, 2, 1, and sold --------
+  // -------- Precise scheduling of flash + beep at 3, 2, 1 seconds --------
+  // Each device schedules its own timers based on the shared timerEndsAt,
+  // so cues fire at (approximately) the same absolute moment on every device
+  // and audio + visual come out of the SAME callback — no drift between them.
   useEffect(() => {
-    if (!currentPlayer || !league.timerEndsAt) return;
-    if (league.status !== "active" || league.paused) return;
-    const pid = currentPlayer.id;
-    const already = flashedAtRef.current[pid] || new Set<number>();
+    if (!currentPlayer || league.status !== "active" || league.paused) return;
+    const endsAt = effectiveEndsAt;
+    if (!endsAt) return;
 
+    const timeouts: number[] = [];
     const showFlash = (text: string, color: string) => {
       setFlash({ text, color, key: Date.now() });
       window.setTimeout(() => setFlash((f) => (f && f.text === text ? null : f)), 900);
     };
+    const schedule = (secondsBefore: number, text: string, color: string, freq: number, vol: number) => {
+      const fireAt = endsAt - secondsBefore * 1000;
+      const delay = fireAt - Date.now();
+      if (delay < -300) return; // already past for this timer
+      timeouts.push(
+        window.setTimeout(() => {
+          // Audio FIRST (perceptually slower), then visual.
+          if (soundOn) beep(freq, 220, vol);
+          showFlash(text, color);
+        }, Math.max(0, delay))
+      );
+    };
 
-    if (secsLeft === 3 && !already.has(3)) {
-      already.add(3);
-      showFlash("GOING ONCE", "bg-amber-500");
-      if (soundOn) beep(880, 220, 0.35);
-    }
-    if (secsLeft === 2 && !already.has(2)) {
-      already.add(2);
-      showFlash("GOING TWICE", "bg-orange-500");
-      if (soundOn) beep(1050, 220, 0.4);
-    }
-    if (secsLeft === 1 && !already.has(1)) {
-      already.add(1);
-      showFlash("LAST CHANCE", "bg-red-600");
-      if (soundOn) beep(1240, 260, 0.4);
-    }
-    flashedAtRef.current[pid] = already;
-  }, [secsLeft, currentPlayer, league.timerEndsAt, league.status, league.paused, soundOn]);
+    schedule(3, "GOING ONCE", "bg-amber-500", 880, 0.4);
+    schedule(2, "GOING TWICE", "bg-orange-500", 1050, 0.45);
+    schedule(1, "LAST CHANCE", "bg-red-600", 1240, 0.5);
+
+    return () => {
+      timeouts.forEach((t) => clearTimeout(t));
+    };
+  }, [effectiveEndsAt, currentPlayer, league.status, league.paused, soundOn]);
 
   // "SOLD to Team for $X" flash + tone when a player finalizes
   const soldSignature = players.map((p) => `${p.id}:${p.status}`).join(",");
@@ -216,6 +231,9 @@ export default function Auction({ league }: { league: League }) {
     setOptPlayerId(league.currentPlayer);
     setOptCurrentBid(amount);
     setOptWinner(me.teamId);
+    // Optimistically extend the timer on THIS device so the countdown reset
+    // is instant (server will confirm within a few hundred ms).
+    setOptTimerEndsAt(new Date(Date.now() + (league.bidTimerSecs || 15) * 1000).toISOString());
 
     // Any user tap unlocks audio for the session
     ensureCtx();
@@ -246,6 +264,7 @@ export default function Auction({ league }: { league: League }) {
 
     setOptCurrentBid(null);
     setOptWinner(null);
+    setOptTimerEndsAt(null);
     setBidding(false);
     setBidErr(msg);
   }
