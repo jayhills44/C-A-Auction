@@ -61,6 +61,9 @@ export default function Auction({ league }: { league: League }) {
 
   const advancedRef = useRef<string | null>(null);
   const lastSoldRef = useRef<string | null>(null);
+  // Server-clock offset: add this to Date.now() to get server time.
+  // Detected on mount by round-tripping /api/time; keeps all devices in sync.
+  const [serverOffset, setServerOffset] = useState(0);
 
   const isCommish =
     typeof window !== "undefined" &&
@@ -87,6 +90,43 @@ export default function Auction({ league }: { league: League }) {
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(id);
+  }, []);
+
+  // Sync to server time on mount. Repeat a few times and keep the sample with
+  // the smallest round-trip for accuracy.
+  useEffect(() => {
+    let cancelled = false;
+    let bestRt = Infinity;
+    let bestOffset = 0;
+
+    async function sample() {
+      const t1 = Date.now();
+      try {
+        const res = await fetch("/api/time", { cache: "no-store" });
+        const t3 = Date.now();
+        const { serverTime } = await res.json();
+        const rt = t3 - t1;
+        // Assume symmetric round trip: server was at (serverTime) when it responded,
+        // which we received at t3. Estimate server "now" at receive time as
+        // serverTime + rt/2. Offset to add to Date.now() to get server time.
+        const estimatedServerAtT3 = serverTime + rt / 2;
+        const offset = estimatedServerAtT3 - t3;
+        if (rt < bestRt) {
+          bestRt = rt;
+          bestOffset = offset;
+          if (!cancelled) setServerOffset(offset);
+        }
+      } catch {}
+    }
+
+    (async () => {
+      for (let i = 0; i < 4 && !cancelled; i++) {
+        await sample();
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, []);
 
   // Clear optimistic overlay when the server catches up
@@ -122,20 +162,26 @@ export default function Auction({ league }: { league: League }) {
   const totalPlayers = players.length;
   const teamById = (id: string | null) => teams.find((t) => t.id === id) || null;
 
-  // Timer freezes at pausedAt while league is paused.
+  // All time math is done in SERVER time so every device shows the same value.
+  const serverNow = now + serverOffset;
+  // Timer freezes at pausedAt while league is paused. pausedAt is already server time.
   const effectiveNow =
-    league.paused && league.pausedAt ? new Date(league.pausedAt).getTime() : now;
+    league.paused && league.pausedAt ? new Date(league.pausedAt).getTime() : serverNow;
   // Use my optimistic end time if it's more recent than the server's (my own bid).
+  // Optimistic end was set using client's Date.now(), convert to server time.
   const effectiveEndsAt = (() => {
     const server = league.timerEndsAt ? new Date(league.timerEndsAt).getTime() : 0;
-    const opt = optTimerEndsAt && optPlayerId === league.currentPlayer ? new Date(optTimerEndsAt).getTime() : 0;
+    const opt =
+      optTimerEndsAt && optPlayerId === league.currentPlayer
+        ? new Date(optTimerEndsAt).getTime() + serverOffset // opt was set in client time
+        : 0;
     const chosen = Math.max(server, opt);
     return chosen > 0 ? chosen : null;
   })();
   const secsLeft = effectiveEndsAt
     ? Math.max(0, Math.ceil((effectiveEndsAt - effectiveNow) / 1000))
     : 0;
-  const timerExpired = !!league.timerEndsAt && new Date(league.timerEndsAt).getTime() <= now;
+  const timerExpired = !!league.timerEndsAt && new Date(league.timerEndsAt).getTime() <= serverNow;
   const minNextBid = displayedBid + 1;
 
   // -------- Precise scheduling of flash + beep at 3, 2, 1 seconds --------
@@ -153,8 +199,9 @@ export default function Auction({ league }: { league: League }) {
       window.setTimeout(() => setFlash((f) => (f && f.text === text ? null : f)), 900);
     };
     const schedule = (secondsBefore: number, text: string, color: string, freq: number, vol: number) => {
-      const fireAt = endsAt - secondsBefore * 1000;
-      const delay = fireAt - Date.now();
+      const fireAt = endsAt - secondsBefore * 1000; // in server time
+      // Convert back to client time for setTimeout.
+      const delay = fireAt - (Date.now() + serverOffset);
       if (delay < -300) return; // already past for this timer
       timeouts.push(
         window.setTimeout(() => {
@@ -172,7 +219,7 @@ export default function Auction({ league }: { league: League }) {
     return () => {
       timeouts.forEach((t) => clearTimeout(t));
     };
-  }, [effectiveEndsAt, currentPlayer, league.status, league.paused, soundOn]);
+  }, [effectiveEndsAt, currentPlayer, league.status, league.paused, soundOn, serverOffset]);
 
   // "SOLD to Team for $X" flash + tone when a player finalizes
   const soldSignature = players.map((p) => `${p.id}:${p.status}`).join(",");
@@ -197,27 +244,27 @@ export default function Auction({ league }: { league: League }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [soldSignature]);
 
-  // Auto-advance when timer hits 0
+  // Auto-advance when timer hits 0 (compared in server time)
   useEffect(() => {
     if (!league.timerEndsAt) return;
     if (league.status !== "active" || league.paused) return;
     const ends = new Date(league.timerEndsAt).getTime();
-    if (now >= ends && league.currentPlayer && advancedRef.current !== league.currentPlayer) {
+    if (serverNow >= ends && league.currentPlayer && advancedRef.current !== league.currentPlayer) {
       advancedRef.current = league.currentPlayer;
       fetch("/api/advance", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomCode: league.roomCode }),
       }).catch(() => {});
     }
-  }, [now, league.timerEndsAt, league.currentPlayer, league.roomCode, league.status, league.paused]);
+  }, [serverNow, league.timerEndsAt, league.currentPlayer, league.roomCode, league.status, league.paused]);
 
-  // Safety net: if we've been stuck at 0 for >2s, try again
+  // Safety net: if we've been stuck at 0 for >2s of server time, try again
   useEffect(() => {
     if (!league.timerEndsAt || league.status !== "active" || league.paused || !league.currentPlayer) return;
     const ends = new Date(league.timerEndsAt).getTime();
-    if (now < ends + 2000) return;
+    if (serverNow < ends + 2000) return;
     advancedRef.current = null;
-  }, [now, league.timerEndsAt, league.currentPlayer, league.status, league.paused]);
+  }, [serverNow, league.timerEndsAt, league.currentPlayer, league.status, league.paused]);
 
   // -------- Bid submission with auto-retry --------
   async function placeBid(amount: number, retriesLeft = 3): Promise<void> {
