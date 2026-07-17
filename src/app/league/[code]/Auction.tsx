@@ -116,7 +116,11 @@ export default function Auction({ league }: { league: League }) {
   const [optTimerEndsAt, setOptTimerEndsAt] = useState<string | null>(null);
 
   const advancedRef = useRef<string | null>(null);
-  const lastSoldRef = useRef<string | null>(null);
+  // Track every player ID we've already announced a SOLD flash for — a Set
+  // (not a single ref) so unpredictable Firestore iteration order can't
+  // resurrect an old sale as if it were new.
+  const announcedSoldRef = useRef<Set<string>>(new Set());
+  const soldInitializedRef = useRef(false);
   const nextUpFiredRef = useRef<string | null>(null);
   const readyGoFiredRef = useRef<string | null>(null);
   const [serverOffset, setServerOffset] = useState(0);
@@ -291,25 +295,38 @@ export default function Auction({ league }: { league: League }) {
     return () => timeouts.forEach((t) => clearTimeout(t));
   }, [effectiveEndsAt, currentPlayer, phase, league.paused, soundOn, serverOffset]);
 
-  // SOLD flash + tone when a player finalizes
-  const soldSignature = players.map((p) => `${p.id}:${p.status}`).join(",");
+  // SOLD flash + tone when a player finalizes.
+  // On first render, mark every already-sold player as "already announced" so
+  // we don't fire retroactive flashes for the whole history.
+  const soldSignature = players.filter((p) => p.status === "sold").map((p) => p.id).sort().join(",");
   useEffect(() => {
-    for (const p of players) {
-      if (p.status === "sold" && lastSoldRef.current !== p.id) {
-        if (lastSoldRef.current === null) {
-          lastSoldRef.current = p.id;
-          continue;
-        }
-        lastSoldRef.current = p.id;
-        const t = teams.find((tt) => tt.id === p.soldTo);
-        if (t && p.soldPrice && p.soldPrice > 0) {
-          setFlash({ text: `SOLD! ${t.name} — $${p.soldPrice}`, color: "bg-green-600", key: Date.now(), size: "big" });
-        } else {
-          setFlash({ text: `${p.name} — UNSOLD`, color: "bg-zinc-600", key: Date.now(), size: "big" });
-        }
-        window.setTimeout(() => setFlash(null), 1800);
-        if (soundOn) playSoldTone();
+    const soldNow = players.filter((p) => p.status === "sold");
+
+    if (!soldInitializedRef.current) {
+      soldInitializedRef.current = true;
+      soldNow.forEach((p) => announcedSoldRef.current.add(p.id));
+      return;
+    }
+
+    // If a previously-sold player has been undone (status flipped back to
+    // "available"), forget them so a re-sale re-announces correctly.
+    const soldIdsNow = new Set(soldNow.map((p) => p.id));
+    for (const id of Array.from(announcedSoldRef.current)) {
+      if (!soldIdsNow.has(id)) announcedSoldRef.current.delete(id);
+    }
+
+    // Announce only players we haven't seen sold before.
+    const brandNew = soldNow.filter((p) => !announcedSoldRef.current.has(p.id));
+    for (const p of brandNew) {
+      announcedSoldRef.current.add(p.id);
+      const t = teams.find((tt) => tt.id === p.soldTo);
+      if (t && p.soldPrice && p.soldPrice > 0) {
+        setFlash({ text: `SOLD! ${t.name} — $${p.soldPrice}`, color: "bg-green-600", key: Date.now(), size: "big" });
+      } else {
+        setFlash({ text: `${p.name} — UNSOLD`, color: "bg-stone-600", key: Date.now(), size: "big" });
       }
+      window.setTimeout(() => setFlash(null), 1800);
+      if (soundOn) playSoldTone();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [soldSignature]);
