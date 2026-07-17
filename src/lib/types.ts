@@ -15,6 +15,9 @@ export interface League {
   currentBid: number;
   currentWinner: string | null; // teamId
   timerEndsAt: string | null;   // ISO string
+  // Phase timestamps for the "NEXT PLAYER UP → READY GO" grand transition.
+  nextPlayerAt: string | null;  // during 5s pause between players (no currentPlayer)
+  bidStartsAt: string | null;   // during 2s "READY GO" reveal (currentPlayer set, no bidding yet)
   paused: boolean;
   pausedAt: string | null;      // ISO string when paused (used to freeze timer)
   commissionerId: string;

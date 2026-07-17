@@ -37,6 +37,8 @@ export async function POST(req: Request) {
         currentBid: 0,
         currentWinner: null,
         timerEndsAt: null,
+        nextPlayerAt: null,
+        bidStartsAt: null,
         paused: false,
         pausedAt: null,
         commissionerId,

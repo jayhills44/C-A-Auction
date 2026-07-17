@@ -4,8 +4,7 @@ import { findLeagueByCode } from "@/lib/engine";
 export const runtime = "nodejs";
 
 // POST /api/pause  { roomCode, commissionerId, pause: boolean }
-// pause=true  -> freeze the auction. Store pausedAt so we can restore later.
-// pause=false -> resume. Shift timerEndsAt forward by (now - pausedAt).
+// Freezes/thaws whichever phase timestamps are currently in effect.
 export async function POST(req: Request) {
   try {
     const { roomCode, commissionerId, pause } = await req.json();
@@ -15,19 +14,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Only the commissioner can pause" }, { status: 403 });
 
     if (pause) {
-      if (league.data.paused) return NextResponse.json({ ok: true }); // idempotent
+      if (league.data.paused) return NextResponse.json({ ok: true });
       await league.ref.update({
         paused: true,
         pausedAt: new Date().toISOString(),
       });
     } else {
       if (!league.data.paused) return NextResponse.json({ ok: true });
-      // Compute how long we were paused; add it to timerEndsAt so remaining time is preserved.
-      let updates: any = { paused: false, pausedAt: null };
-      if (league.data.pausedAt && league.data.timerEndsAt) {
+      const updates: any = { paused: false, pausedAt: null };
+      if (league.data.pausedAt) {
         const pausedMs = Date.now() - new Date(league.data.pausedAt).getTime();
-        const newEnds = new Date(new Date(league.data.timerEndsAt).getTime() + pausedMs).toISOString();
-        updates.timerEndsAt = newEnds;
+        const shift = (iso: string | null) =>
+          iso ? new Date(new Date(iso).getTime() + pausedMs).toISOString() : null;
+        if (league.data.timerEndsAt) updates.timerEndsAt = shift(league.data.timerEndsAt);
+        if (league.data.bidStartsAt) updates.bidStartsAt = shift(league.data.bidStartsAt);
+        if (league.data.nextPlayerAt) updates.nextPlayerAt = shift(league.data.nextPlayerAt);
       }
       await league.ref.update(updates);
     }

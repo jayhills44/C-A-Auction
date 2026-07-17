@@ -5,7 +5,7 @@ import { collection, onSnapshot, orderBy, query, limit } from "firebase/firestor
 import { positionColor } from "@/lib/utils";
 import type { League, Team, Player, Bid } from "@/lib/types";
 
-// -------- Web Audio beep helpers (no files needed) --------
+// -------- Web Audio helpers --------
 let audioCtx: AudioContext | null = null;
 function ensureCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -35,9 +35,65 @@ function beep(freq: number, durMs = 180, vol = 0.35) {
   osc.stop(ctx.currentTime + durMs / 1000 + 0.02);
 }
 function playSoldTone() {
-  // Two-tone "ding": higher note then lower.
   beep(1200, 140, 0.4);
   setTimeout(() => beep(900, 260, 0.4), 130);
+}
+// Brass-ish fanfare using square+sawtooth mix, ascending arpeggio.
+function playFanfare() {
+  const ctx = ensureCtx();
+  if (!ctx) return;
+  const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+  notes.forEach((f, i) => {
+    const start = ctx.currentTime + i * 0.14;
+    // Two oscillators for a fuller brass tone
+    ["sawtooth", "square"].forEach((type, k) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type as OscillatorType;
+      osc.frequency.value = f * (k === 1 ? 1.005 : 1); // slight detune
+      const dur = i === notes.length - 1 ? 0.6 : 0.2;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(k === 0 ? 0.28 : 0.15, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    });
+  });
+}
+
+// -------- Roster slot organizer --------
+type RosterSlots = {
+  QB: (Player | null)[];
+  RB: (Player | null)[];
+  WR: (Player | null)[];
+  TE: (Player | null)[];
+  FLEX: (Player | null)[];
+  BENCH: Player[];
+};
+function organizeRoster(won: Player[]): RosterSlots {
+  const qbs = won.filter((p) => p.position === "QB");
+  const rbs = won.filter((p) => p.position === "RB");
+  const wrs = won.filter((p) => p.position === "WR");
+  const tes = won.filter((p) => p.position === "TE");
+  const others = won.filter((p) => !["QB", "RB", "WR", "TE"].includes(p.position));
+
+  const qbSlots: (Player | null)[] = [qbs[0] || null, qbs[1] || null];
+  const rbSlots: (Player | null)[] = [rbs[0] || null, rbs[1] || null];
+  const wrSlots: (Player | null)[] = [wrs[0] || null, wrs[1] || null];
+  const teSlot: (Player | null)[] = [tes[0] || null];
+
+  const flexPool = [...rbs.slice(2), ...wrs.slice(2), ...tes.slice(1)];
+  const flexSlot: (Player | null)[] = [flexPool[0] || null];
+
+  const bench: Player[] = [
+    ...qbs.slice(2),
+    ...flexPool.slice(1),
+    ...others,
+  ];
+
+  return { QB: qbSlots, RB: rbSlots, WR: wrSlots, TE: teSlot, FLEX: flexSlot, BENCH: bench };
 }
 
 export default function Auction({ league }: { league: League }) {
@@ -51,9 +107,8 @@ export default function Auction({ league }: { league: League }) {
   const [advancing, setAdvancing] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
-  const [flash, setFlash] = useState<{ text: string; color: string; key: number } | null>(null);
+  const [flash, setFlash] = useState<{ text: string; color: string; key: number; size?: "big" } | null>(null);
 
-  // Optimistic overlays so we don't wait on Firestore for the tapper's screen.
   const [optCurrentBid, setOptCurrentBid] = useState<number | null>(null);
   const [optWinner, setOptWinner] = useState<string | null>(null);
   const [optPlayerId, setOptPlayerId] = useState<string | null>(null);
@@ -61,8 +116,8 @@ export default function Auction({ league }: { league: League }) {
 
   const advancedRef = useRef<string | null>(null);
   const lastSoldRef = useRef<string | null>(null);
-  // Server-clock offset: add this to Date.now() to get server time.
-  // Detected on mount by round-tripping /api/time; keeps all devices in sync.
+  const nextUpFiredRef = useRef<string | null>(null);
+  const readyGoFiredRef = useRef<string | null>(null);
   const [serverOffset, setServerOffset] = useState(0);
 
   const isCommish =
@@ -76,6 +131,7 @@ export default function Auction({ league }: { league: League }) {
   }, [league.roomCode]);
   const myTeam = teams.find((t) => t.id === me?.teamId) || null;
 
+  // Live subs
   useEffect(() => {
     const db = firestore();
     const unsubT = onSnapshot(query(collection(db, "leagues", league.id, "teams"), orderBy("createdAt")),
@@ -92,13 +148,10 @@ export default function Auction({ league }: { league: League }) {
     return () => clearInterval(id);
   }, []);
 
-  // Sync to server time on mount. Repeat a few times and keep the sample with
-  // the smallest round-trip for accuracy.
+  // Server-time sync
   useEffect(() => {
     let cancelled = false;
     let bestRt = Infinity;
-    let bestOffset = 0;
-
     async function sample() {
       const t1 = Date.now();
       try {
@@ -106,30 +159,23 @@ export default function Auction({ league }: { league: League }) {
         const t3 = Date.now();
         const { serverTime } = await res.json();
         const rt = t3 - t1;
-        // Assume symmetric round trip: server was at (serverTime) when it responded,
-        // which we received at t3. Estimate server "now" at receive time as
-        // serverTime + rt/2. Offset to add to Date.now() to get server time.
-        const estimatedServerAtT3 = serverTime + rt / 2;
-        const offset = estimatedServerAtT3 - t3;
+        const offset = serverTime + rt / 2 - t3;
         if (rt < bestRt) {
           bestRt = rt;
-          bestOffset = offset;
           if (!cancelled) setServerOffset(offset);
         }
       } catch {}
     }
-
     (async () => {
       for (let i = 0; i < 4 && !cancelled; i++) {
         await sample();
         await new Promise((r) => setTimeout(r, 400));
       }
     })();
-
     return () => { cancelled = true; };
   }, []);
 
-  // Clear optimistic overlay when the server catches up
+  // Optimistic overlay cleanup
   useEffect(() => {
     if (optPlayerId && optPlayerId === league.currentPlayer) {
       if (
@@ -162,18 +208,14 @@ export default function Auction({ league }: { league: League }) {
   const totalPlayers = players.length;
   const teamById = (id: string | null) => teams.find((t) => t.id === id) || null;
 
-  // All time math is done in SERVER time so every device shows the same value.
   const serverNow = now + serverOffset;
-  // Timer freezes at pausedAt while league is paused. pausedAt is already server time.
   const effectiveNow =
     league.paused && league.pausedAt ? new Date(league.pausedAt).getTime() : serverNow;
-  // Use my optimistic end time if it's more recent than the server's (my own bid).
-  // Optimistic end was set using client's Date.now(), convert to server time.
   const effectiveEndsAt = (() => {
     const server = league.timerEndsAt ? new Date(league.timerEndsAt).getTime() : 0;
     const opt =
       optTimerEndsAt && optPlayerId === league.currentPlayer
-        ? new Date(optTimerEndsAt).getTime() + serverOffset // opt was set in client time
+        ? new Date(optTimerEndsAt).getTime() + serverOffset
         : 0;
     const chosen = Math.max(server, opt);
     return chosen > 0 ? chosen : null;
@@ -184,12 +226,45 @@ export default function Auction({ league }: { league: League }) {
   const timerExpired = !!league.timerEndsAt && new Date(league.timerEndsAt).getTime() <= serverNow;
   const minNextBid = displayedBid + 1;
 
-  // -------- Precise scheduling of flash + beep at 3, 2, 1 seconds --------
-  // Each device schedules its own timers based on the shared timerEndsAt,
-  // so cues fire at (approximately) the same absolute moment on every device
-  // and audio + visual come out of the SAME callback — no drift between them.
+  // Derive current phase
+  const nextPlayerAt = league.nextPlayerAt ? new Date(league.nextPlayerAt).getTime() : null;
+  const bidStartsAt = league.bidStartsAt ? new Date(league.bidStartsAt).getTime() : null;
+  const phase: "pause" | "reveal" | "bidding" | "idle" =
+    !currentPlayer && nextPlayerAt && nextPlayerAt > serverNow ? "pause"
+    : currentPlayer && bidStartsAt && bidStartsAt > serverNow ? "reveal"
+    : currentPlayer && league.timerEndsAt ? "bidding"
+    : "idle";
+
+  const pauseSecsLeft = nextPlayerAt ? Math.max(0, Math.ceil((nextPlayerAt - serverNow) / 1000)) : 0;
+
+  // "NEXT PLAYER UP" flash + fanfare at start of pause phase
   useEffect(() => {
-    if (!currentPlayer || league.status !== "active" || league.paused) return;
+    if (phase !== "pause" || !league.nextPlayerAt) return;
+    const key = league.nextPlayerAt;
+    if (nextUpFiredRef.current === key) return;
+    nextUpFiredRef.current = key;
+    setFlash({ text: "NEXT PLAYER UP", color: "bg-fuchsia-700", key: Date.now(), size: "big" });
+    window.setTimeout(() => setFlash((f) => (f && f.text === "NEXT PLAYER UP" ? null : f)), 2200);
+    if (soundOn) playFanfare();
+  }, [phase, league.nextPlayerAt, soundOn]);
+
+  // "READY, GO!" flash at start of reveal phase
+  useEffect(() => {
+    if (phase !== "reveal" || !currentPlayer || !league.bidStartsAt) return;
+    const key = league.bidStartsAt;
+    if (readyGoFiredRef.current === key) return;
+    readyGoFiredRef.current = key;
+    setFlash({ text: "READY, GO!", color: "bg-emerald-600", key: Date.now(), size: "big" });
+    window.setTimeout(() => setFlash((f) => (f && f.text === "READY, GO!" ? null : f)), 1500);
+    if (soundOn) {
+      beep(880, 120, 0.35);
+      setTimeout(() => beep(1320, 220, 0.4), 130);
+    }
+  }, [phase, currentPlayer, league.bidStartsAt, soundOn]);
+
+  // Precise scheduling of Going Once/Twice/Last Chance
+  useEffect(() => {
+    if (phase !== "bidding" || !currentPlayer || league.paused) return;
     const endsAt = effectiveEndsAt;
     if (!endsAt) return;
 
@@ -199,29 +274,23 @@ export default function Auction({ league }: { league: League }) {
       window.setTimeout(() => setFlash((f) => (f && f.text === text ? null : f)), 900);
     };
     const schedule = (secondsBefore: number, text: string, color: string, freq: number, vol: number) => {
-      const fireAt = endsAt - secondsBefore * 1000; // in server time
-      // Convert back to client time for setTimeout.
+      const fireAt = endsAt - secondsBefore * 1000;
       const delay = fireAt - (Date.now() + serverOffset);
-      if (delay < -300) return; // already past for this timer
+      if (delay < -300) return;
       timeouts.push(
         window.setTimeout(() => {
-          // Audio FIRST (perceptually slower), then visual.
           if (soundOn) beep(freq, 220, vol);
           showFlash(text, color);
         }, Math.max(0, delay))
       );
     };
-
     schedule(3, "GOING ONCE", "bg-amber-500", 880, 0.4);
     schedule(2, "GOING TWICE", "bg-orange-500", 1050, 0.45);
     schedule(1, "LAST CHANCE", "bg-red-600", 1240, 0.5);
+    return () => timeouts.forEach((t) => clearTimeout(t));
+  }, [effectiveEndsAt, currentPlayer, phase, league.paused, soundOn, serverOffset]);
 
-    return () => {
-      timeouts.forEach((t) => clearTimeout(t));
-    };
-  }, [effectiveEndsAt, currentPlayer, league.status, league.paused, soundOn, serverOffset]);
-
-  // "SOLD to Team for $X" flash + tone when a player finalizes
+  // SOLD flash + tone when a player finalizes
   const soldSignature = players.map((p) => `${p.id}:${p.status}`).join(",");
   useEffect(() => {
     for (const p of players) {
@@ -233,42 +302,62 @@ export default function Auction({ league }: { league: League }) {
         lastSoldRef.current = p.id;
         const t = teams.find((tt) => tt.id === p.soldTo);
         if (t && p.soldPrice && p.soldPrice > 0) {
-          setFlash({ text: `SOLD! ${t.name} — $${p.soldPrice}`, color: "bg-green-600", key: Date.now() });
+          setFlash({ text: `SOLD! ${t.name} — $${p.soldPrice}`, color: "bg-green-600", key: Date.now(), size: "big" });
         } else {
-          setFlash({ text: `${p.name} — UNSOLD`, color: "bg-zinc-600", key: Date.now() });
+          setFlash({ text: `${p.name} — UNSOLD`, color: "bg-zinc-600", key: Date.now(), size: "big" });
         }
-        window.setTimeout(() => setFlash(null), 1400);
+        window.setTimeout(() => setFlash(null), 1800);
         if (soundOn) playSoldTone();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [soldSignature]);
 
-  // Auto-advance when timer hits 0 (compared in server time)
+  // Auto-advance on any expired phase timestamp (server-time aware)
   useEffect(() => {
-    if (!league.timerEndsAt) return;
     if (league.status !== "active" || league.paused) return;
-    const ends = new Date(league.timerEndsAt).getTime();
-    if (serverNow >= ends && league.currentPlayer && advancedRef.current !== league.currentPlayer) {
-      advancedRef.current = league.currentPlayer;
+
+    let shouldFire = false;
+    let key = "";
+    if (league.timerEndsAt && new Date(league.timerEndsAt).getTime() <= serverNow && league.currentPlayer) {
+      shouldFire = true;
+      key = `bid:${league.currentPlayer}`;
+    } else if (league.bidStartsAt && new Date(league.bidStartsAt).getTime() <= serverNow && league.currentPlayer && !league.timerEndsAt) {
+      shouldFire = true;
+      key = `reveal:${league.currentPlayer}`;
+    } else if (league.nextPlayerAt && new Date(league.nextPlayerAt).getTime() <= serverNow && !league.currentPlayer) {
+      shouldFire = true;
+      key = `pause:${league.nextPlayerAt}`;
+    }
+
+    if (shouldFire && advancedRef.current !== key) {
+      advancedRef.current = key;
       fetch("/api/advance", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ roomCode: league.roomCode }),
       }).catch(() => {});
     }
-  }, [serverNow, league.timerEndsAt, league.currentPlayer, league.roomCode, league.status, league.paused]);
+  }, [
+    serverNow, league.status, league.paused, league.roomCode,
+    league.timerEndsAt, league.bidStartsAt, league.nextPlayerAt, league.currentPlayer,
+  ]);
 
-  // Safety net: if we've been stuck at 0 for >2s of server time, try again
+  // Safety net: if 2s past any expected transition and nothing happened, retry
   useEffect(() => {
-    if (!league.timerEndsAt || league.status !== "active" || league.paused || !league.currentPlayer) return;
-    const ends = new Date(league.timerEndsAt).getTime();
-    if (serverNow < ends + 2000) return;
-    advancedRef.current = null;
-  }, [serverNow, league.timerEndsAt, league.currentPlayer, league.status, league.paused]);
+    if (league.status !== "active" || league.paused) return;
+    const guards = [
+      league.timerEndsAt ? new Date(league.timerEndsAt).getTime() + 2000 : Infinity,
+      league.bidStartsAt ? new Date(league.bidStartsAt).getTime() + 2000 : Infinity,
+      league.nextPlayerAt ? new Date(league.nextPlayerAt).getTime() + 2000 : Infinity,
+    ];
+    const anyOverdue = guards.some((g) => g !== Infinity && serverNow > g);
+    if (anyOverdue) advancedRef.current = null;
+  }, [serverNow, league.status, league.paused, league.timerEndsAt, league.bidStartsAt, league.nextPlayerAt]);
 
-  // -------- Bid submission with auto-retry --------
+  // -------- Bid submission --------
   async function placeBid(amount: number, retriesLeft = 3): Promise<void> {
     setBidErr("");
+    if (phase !== "bidding") { setBidErr("Bidding hasn't started yet"); return; }
     if (league.paused) { setBidErr("Auction is paused"); return; }
     if (!me || !myTeam) { setBidErr("You haven't joined as a team."); return; }
     if (!Number.isInteger(amount) || amount < 1) { setBidErr("Enter a whole number."); return; }
@@ -278,11 +367,7 @@ export default function Auction({ league }: { league: League }) {
     setOptPlayerId(league.currentPlayer);
     setOptCurrentBid(amount);
     setOptWinner(me.teamId);
-    // Optimistically extend the timer on THIS device so the countdown reset
-    // is instant (server will confirm within a few hundred ms).
     setOptTimerEndsAt(new Date(Date.now() + (league.bidTimerSecs || 15) * 1000).toISOString());
-
-    // Any user tap unlocks audio for the session
     ensureCtx();
 
     const res = await fetch("/api/bid", {
@@ -292,11 +377,7 @@ export default function Auction({ league }: { league: League }) {
       }),
     });
 
-    if (res.ok) {
-      setBidding(false);
-      setMyBid("");
-      return;
-    }
+    if (res.ok) { setBidding(false); setMyBid(""); return; }
 
     const j = await res.json().catch(() => ({}));
     const msg: string = j.error || "Bid failed";
@@ -304,11 +385,8 @@ export default function Auction({ league }: { league: League }) {
     const m = msg.match(/higher than current \(\$?(\d+)\)/i);
     if (m && retriesLeft > 0) {
       const newAmount = parseInt(m[1], 10) + 1;
-      if (myTeam && newAmount <= myTeam.budgetLeft) {
-        return placeBid(newAmount, retriesLeft - 1);
-      }
+      if (myTeam && newAmount <= myTeam.budgetLeft) return placeBid(newAmount, retriesLeft - 1);
     }
-
     setOptCurrentBid(null);
     setOptWinner(null);
     setOptTimerEndsAt(null);
@@ -316,7 +394,6 @@ export default function Auction({ league }: { league: League }) {
     setBidErr(msg);
   }
 
-  // -------- Commissioner actions --------
   async function forceNext() {
     setAdvancing(true);
     const commissionerId = localStorage.getItem(`commish:${league.roomCode}`);
@@ -350,22 +427,26 @@ export default function Auction({ league }: { league: League }) {
     }).catch(() => {});
   }
 
-  // Only enable "Draw Next Player" when timer expired OR no player is up
   const canForceDrawNext = !league.currentPlayer || timerExpired;
 
+  // -------- Render --------
+  const flashClasses = flash?.size === "big"
+    ? "text-4xl md:text-6xl px-10 py-8"
+    : "text-3xl md:text-5xl px-8 py-6";
+
   return (
-    <main className="mx-auto max-w-md p-4 pb-32 relative">
-      {/* Flash overlay */}
+    <main className="mx-auto max-w-7xl p-4 pb-16 relative">
+      {/* Full-screen flash overlay */}
       {flash && (
-        <div key={flash.key} className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none animate-pulse">
-          <div className={`${flash.color} text-white text-3xl md:text-5xl font-black px-8 py-6 rounded-2xl shadow-2xl border-4 border-white/30 -rotate-3`}>
+        <div key={flash.key} className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className={`${flash.color} ${flashClasses} text-white font-black rounded-2xl shadow-2xl border-4 border-white/40 -rotate-3 animate-pulse`}>
             {flash.text}
           </div>
         </div>
       )}
 
       <div className="flex items-center justify-between text-xs text-zinc-400 mb-3">
-        <div>Room <span className="font-mono text-zinc-200">{league.roomCode}</span></div>
+        <div>Room <span className="font-mono text-zinc-200">{league.roomCode}</span> · {league.name}</div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => { setSoundOn((v) => !v); ensureCtx(); }}
@@ -384,154 +465,200 @@ export default function Auction({ league }: { league: League }) {
         </div>
       )}
 
-      {currentPlayer ? (
-        <div className="bg-zinc-900 rounded-3xl border border-zinc-800 p-5 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${positionColor(currentPlayer.position)}`}>
-              {currentPlayer.position}
-            </span>
-            {currentPlayer.nflTeam && <span className="text-xs text-zinc-400">{currentPlayer.nflTeam}</span>}
-          </div>
-          <h2 className="text-3xl font-bold leading-tight">{currentPlayer.name}</h2>
-
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <div className="bg-zinc-800 rounded-xl py-3">
-              <div className="text-xs text-zinc-400">Current bid</div>
-              <div className="text-2xl font-bold">${displayedBid}</div>
-              <div className="text-xs text-zinc-400 mt-1">
-                {displayedWinner ? teamById(displayedWinner)?.name : "—"}
-              </div>
+      {/* Split screen: left = auction, right = team rosters */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Left: auction machine */}
+        <div>
+          {phase === "pause" ? (
+            <div className="bg-fuchsia-900/40 rounded-3xl border-2 border-fuchsia-600/50 p-6 text-center min-h-[220px] flex flex-col justify-center">
+              <div className="text-xs text-fuchsia-300 uppercase tracking-widest">Get ready</div>
+              <div className="text-3xl md:text-4xl font-black mt-2">Next player coming up</div>
+              <div className="text-sm text-zinc-300 mt-3">{pauseSecsLeft}s…</div>
             </div>
-            <div className={`rounded-xl py-3 ${league.paused ? "bg-yellow-900/40" : secsLeft <= 3 ? "bg-red-900/60" : "bg-zinc-800"}`}>
-              <div className="text-xs text-zinc-400">Timer</div>
-              <div className="text-2xl font-bold">{secsLeft}s</div>
+          ) : phase === "reveal" && currentPlayer ? (
+            <div className="bg-emerald-900/40 rounded-3xl border-2 border-emerald-500/60 p-6 text-center">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${positionColor(currentPlayer.position)}`}>
+                  {currentPlayer.position}
+                </span>
+                {currentPlayer.nflTeam && <span className="text-xs text-zinc-300">{currentPlayer.nflTeam}</span>}
+              </div>
+              <h2 className="text-4xl font-black leading-tight">{currentPlayer.name}</h2>
+              <div className="text-xs text-emerald-300 uppercase tracking-widest mt-4">Ready…</div>
             </div>
-          </div>
+          ) : currentPlayer ? (
+            <div className="bg-zinc-900 rounded-3xl border border-zinc-800 p-5 text-center">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${positionColor(currentPlayer.position)}`}>
+                  {currentPlayer.position}
+                </span>
+                {currentPlayer.nflTeam && <span className="text-xs text-zinc-400">{currentPlayer.nflTeam}</span>}
+              </div>
+              <h2 className="text-3xl font-bold leading-tight">{currentPlayer.name}</h2>
 
-          {myTeam ? (
-            <div className="mt-5">
-              <div className="text-xs text-zinc-400">Your budget: <span className="text-white font-bold">${myTeam.budgetLeft}</span></div>
-              <div className="mt-2 flex gap-2">
-                <button onClick={() => placeBid(minNextBid)} disabled={bidding || league.paused}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-[.98] transition disabled:bg-zinc-700 py-4 rounded-lg font-semibold text-lg">
-                  Bid ${minNextBid}
-                </button>
-                <button onClick={() => placeBid(Math.max(minNextBid, displayedBid + 5))} disabled={bidding || league.paused}
-                  className="flex-1 bg-blue-700 hover:bg-blue-600 active:scale-[.98] transition disabled:bg-zinc-700 py-4 rounded-lg font-semibold text-lg">
-                  +$5
-                </button>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <div className="bg-zinc-800 rounded-xl py-3">
+                  <div className="text-xs text-zinc-400">Current bid</div>
+                  <div className="text-3xl font-bold">${displayedBid}</div>
+                  <div className="text-xs text-zinc-400 mt-1">
+                    {displayedWinner ? teamById(displayedWinner)?.name : "—"}
+                  </div>
+                </div>
+                <div className={`rounded-xl py-3 ${league.paused ? "bg-yellow-900/40" : secsLeft <= 3 ? "bg-red-900/60" : "bg-zinc-800"}`}>
+                  <div className="text-xs text-zinc-400">Timer</div>
+                  <div className="text-3xl font-bold">{secsLeft}s</div>
+                </div>
               </div>
-              <div className="mt-2 flex gap-2">
-                <input
-                  type="number" min={minNextBid} value={myBid}
-                  onChange={(e) => setMyBid(e.target.value)}
-                  placeholder={`Custom (min $${minNextBid})`}
-                  className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-3 outline-none focus:border-blue-500"
-                />
-                <button onClick={() => placeBid(Number(myBid))} disabled={bidding || !myBid || league.paused}
-                  className="px-4 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 rounded-lg font-semibold">
-                  Bid
-                </button>
-              </div>
-              {bidErr && <div className="mt-2 text-red-400 text-sm">{bidErr}</div>}
+
+              {myTeam ? (
+                <div className="mt-5">
+                  <div className="text-xs text-zinc-400">Your budget: <span className="text-white font-bold">${myTeam.budgetLeft}</span></div>
+                  <div className="mt-2 flex gap-2">
+                    <button onClick={() => placeBid(minNextBid)} disabled={bidding || league.paused}
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-[.98] transition disabled:bg-zinc-700 py-4 rounded-lg font-semibold text-lg">
+                      Bid ${minNextBid}
+                    </button>
+                    <button onClick={() => placeBid(Math.max(minNextBid, displayedBid + 5))} disabled={bidding || league.paused}
+                      className="flex-1 bg-blue-700 hover:bg-blue-600 active:scale-[.98] transition disabled:bg-zinc-700 py-4 rounded-lg font-semibold text-lg">
+                      +$5
+                    </button>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="number" min={minNextBid} value={myBid}
+                      onChange={(e) => setMyBid(e.target.value)}
+                      placeholder={`Custom (min $${minNextBid})`}
+                      className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-3 outline-none focus:border-blue-500"
+                    />
+                    <button onClick={() => placeBid(Number(myBid))} disabled={bidding || !myBid || league.paused}
+                      className="px-4 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 rounded-lg font-semibold">
+                      Bid
+                    </button>
+                  </div>
+                  {bidErr && <div className="mt-2 text-red-400 text-sm">{bidErr}</div>}
+                </div>
+              ) : (
+                <p className="mt-5 text-zinc-400 text-sm">Spectating — you haven't joined as a team on this device.</p>
+              )}
             </div>
           ) : (
-            <p className="mt-5 text-zinc-400 text-sm">Spectating — you haven't joined as a team on this device.</p>
+            <div className="bg-zinc-900 rounded-3xl border border-zinc-800 p-6 text-center min-h-[220px] flex items-center justify-center">
+              <p>Drawing next player…</p>
+            </div>
           )}
-        </div>
-      ) : (
-        <div className="bg-zinc-900 rounded-3xl border border-zinc-800 p-6 text-center">
-          <p>Drawing next player…</p>
-        </div>
-      )}
 
-      {/* Commissioner controls */}
-      {isCommish && (
-        <div className="mt-4 space-y-2">
-          <div className="flex gap-2">
-            <button
-              onClick={togglePause}
-              disabled={pausing}
-              className={`flex-1 py-3 rounded-lg font-semibold ${
-                league.paused
-                  ? "bg-green-600 hover:bg-green-500"
-                  : "bg-yellow-600 hover:bg-yellow-500"
-              } disabled:bg-zinc-700`}
-            >
-              {league.paused ? "▶ Resume Draft" : "⏸ Pause Draft"}
-            </button>
-            <button
-              onClick={forceNext}
-              disabled={advancing || !canForceDrawNext || league.paused}
-              title={
-                !canForceDrawNext
-                  ? "Wait for the current bid to finish (or pause first)"
-                  : ""
-              }
-              className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 py-3 rounded-lg font-semibold"
-            >
-              {advancing ? "Advancing…" : "Draw Next Player"}
-            </button>
-          </div>
-          <p className="text-[10px] text-zinc-500 text-center">
-            Commissioner controls · Pause blocks new bids · Draw Next only after timer expires
-          </p>
-        </div>
-      )}
-
-      <section className="mt-6">
-        <h3 className="text-sm font-semibold text-zinc-300 mb-2">Recent bids</h3>
-        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-          {bids.slice(0, 12).map((b) => {
-            const t = teamById(b.teamId);
-            const p = players.find((x) => x.id === b.playerId);
-            return (
-              <div key={b.id} className="text-sm flex justify-between bg-zinc-900/60 rounded px-3 py-1.5">
-                <span className="truncate">{t?.name || "?"} <span className="text-zinc-500">→</span> {p?.name || "?"}</span>
-                <span className="font-mono text-green-400">${b.amount}</span>
+          {isCommish && (
+            <div className="mt-4 space-y-2">
+              <div className="flex gap-2">
+                <button onClick={togglePause} disabled={pausing}
+                  className={`flex-1 py-3 rounded-lg font-semibold ${
+                    league.paused ? "bg-green-600 hover:bg-green-500" : "bg-yellow-600 hover:bg-yellow-500"
+                  } disabled:bg-zinc-700`}>
+                  {league.paused ? "▶ Resume Draft" : "⏸ Pause Draft"}
+                </button>
+                <button onClick={forceNext} disabled={advancing || !canForceDrawNext || league.paused}
+                  title={!canForceDrawNext ? "Wait for the current bid to finish (or pause first)" : ""}
+                  className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 py-3 rounded-lg font-semibold">
+                  {advancing ? "Advancing…" : "Draw Next Player"}
+                </button>
               </div>
-            );
-          })}
-          {bids.length === 0 && <div className="text-zinc-500 text-sm">No bids yet.</div>}
-        </div>
-      </section>
+              <p className="text-[10px] text-zinc-500 text-center">
+                Commissioner controls · Pause blocks new bids · Draw Next only after timer expires
+              </p>
+            </div>
+          )}
 
-      <section className="mt-6">
-        <h3 className="text-sm font-semibold text-zinc-300 mb-2">Teams</h3>
-        <div className="grid grid-cols-1 gap-2">
-          {teams.map((t) => {
-            const won = soldPlayers.filter((p) => p.soldTo === t.id);
-            return (
-              <div key={t.id} className="bg-zinc-900 rounded-xl border border-zinc-800 px-3 py-2">
-                <div className="flex justify-between items-baseline">
-                  <span className="font-medium">{t.name}</span>
-                  <span className="text-sm text-zinc-300">
-                    ${t.budgetLeft} <span className="text-zinc-500">/ {won.length} players</span>
-                  </span>
-                </div>
-                {won.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {won.map((p) => (
-                      <span key={p.id} className={`text-[10px] pl-1.5 py-0.5 rounded ${positionColor(p.position)} inline-flex items-center gap-1`}>
-                        <span>{p.name} ${p.soldPrice}</span>
-                        {isCommish && (
-                          <button
-                            onClick={() => undoSale(p.id)}
-                            title="Undo sale (return to pool + refund team)"
-                            className="ml-1 pr-1.5 opacity-80 hover:opacity-100"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </span>
-                    ))}
+          <section className="mt-6">
+            <h3 className="text-sm font-semibold text-zinc-300 mb-2">Recent bids</h3>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {bids.slice(0, 12).map((b) => {
+                const t = teamById(b.teamId);
+                const p = players.find((x) => x.id === b.playerId);
+                return (
+                  <div key={b.id} className="text-sm flex justify-between bg-zinc-900/60 rounded px-3 py-1.5">
+                    <span className="truncate">{t?.name || "?"} <span className="text-zinc-500">→</span> {p?.name || "?"}</span>
+                    <span className="font-mono text-green-400">${b.amount}</span>
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+              {bids.length === 0 && <div className="text-zinc-500 text-sm">No bids yet.</div>}
+            </div>
+          </section>
         </div>
-      </section>
+
+        {/* Right: team rosters by position slot */}
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-300 mb-2">Team Rosters</h3>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {teams.map((t) => {
+              const won = soldPlayers.filter((p) => p.soldTo === t.id);
+              const slots = organizeRoster(won);
+              return (
+                <div key={t.id} className="bg-zinc-900 rounded-xl border border-zinc-800 p-2.5">
+                  <div className="flex justify-between items-baseline mb-1.5">
+                    <span className="font-semibold text-sm truncate">{t.name}</span>
+                    <span className="text-xs font-mono text-green-400">${t.budgetLeft}</span>
+                  </div>
+                  <RosterSlotList label="QB" slots={slots.QB} isCommish={isCommish} onUndo={undoSale} />
+                  <RosterSlotList label="RB" slots={slots.RB} isCommish={isCommish} onUndo={undoSale} />
+                  <RosterSlotList label="WR" slots={slots.WR} isCommish={isCommish} onUndo={undoSale} />
+                  <RosterSlotList label="TE" slots={slots.TE} isCommish={isCommish} onUndo={undoSale} />
+                  <RosterSlotList label="FLEX" slots={slots.FLEX} isCommish={isCommish} onUndo={undoSale} />
+                  {slots.BENCH.length > 0 && (
+                    <div className="mt-1 pt-1 border-t border-zinc-800">
+                      <div className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">Bench</div>
+                      <div className="flex flex-wrap gap-0.5">
+                        {slots.BENCH.map((p) => (
+                          <BenchPill key={p.id} player={p} isCommish={isCommish} onUndo={undoSale} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </main>
+  );
+}
+
+function RosterSlotList({
+  label, slots, isCommish, onUndo,
+}: { label: string; slots: (Player | null)[]; isCommish: boolean; onUndo: (id: string) => void }) {
+  return (
+    <div className="flex items-center gap-1 text-[11px] mb-0.5">
+      <span className="w-9 text-zinc-500 font-semibold shrink-0">{label}</span>
+      <div className="flex flex-wrap gap-0.5 flex-1">
+        {slots.map((p, i) =>
+          p ? (
+            <span key={p.id} className={`px-1.5 py-0.5 rounded ${positionColor(p.position)} inline-flex items-center gap-1`}>
+              <span className="truncate max-w-[80px]" title={p.name}>{p.name}</span>
+              <span className="opacity-80">${p.soldPrice}</span>
+              {isCommish && (
+                <button onClick={() => onUndo(p.id)} title="Undo (return + refund)" className="opacity-70 hover:opacity-100 pl-0.5">
+                  ×
+                </button>
+              )}
+            </span>
+          ) : (
+            <span key={`empty-${label}-${i}`} className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-600">—</span>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BenchPill({ player, isCommish, onUndo }: { player: Player; isCommish: boolean; onUndo: (id: string) => void }) {
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded ${positionColor(player.position)} inline-flex items-center gap-1`}>
+      <span className="truncate max-w-[80px]">{player.name}</span>
+      <span className="opacity-80">${player.soldPrice}</span>
+      {isCommish && (
+        <button onClick={() => onUndo(player.id)} title="Undo" className="opacity-70 hover:opacity-100">×</button>
+      )}
+    </span>
   );
 }
