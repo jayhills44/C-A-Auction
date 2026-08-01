@@ -39,6 +39,7 @@ export async function POST(req: Request) {
         timerEndsAt: null,
         nextPlayerAt: null,
         bidStartsAt: null,
+        queuedPlayerId: null,
         paused: false,
         pausedAt: null,
         commissionerId,

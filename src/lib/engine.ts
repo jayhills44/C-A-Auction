@@ -27,8 +27,8 @@ export async function schedulePause(leagueId: string) {
   });
 }
 
-// Pick a random AVAILABLE player and enter the REVEAL phase.
-// If none remain, mark the league completed.
+// Pick the next player and enter the REVEAL phase. If the league has a
+// queuedPlayerId set (commissioner override), use that instead of random.
 export async function drawNextPlayer(leagueId: string) {
   const db = adminDb();
   const leagueRef = db.collection("leagues").doc(leagueId);
@@ -47,12 +47,22 @@ export async function drawNextPlayer(leagueId: string) {
       timerEndsAt: null,
       nextPlayerAt: null,
       bidStartsAt: null,
+      queuedPlayerId: null,
     });
     return;
   }
 
-  const docs = availSnap.docs;
-  const pick = docs[Math.floor(Math.random() * docs.length)];
+  // Commissioner queued a specific player as next? Use it, if still available.
+  let pick = null as null | { id: string; ref: FirebaseFirestore.DocumentReference };
+  if (l.queuedPlayerId) {
+    const queued = availSnap.docs.find((d) => d.id === l.queuedPlayerId);
+    if (queued) pick = { id: queued.id, ref: queued.ref };
+  }
+  if (!pick) {
+    const docs = availSnap.docs;
+    const random = docs[Math.floor(Math.random() * docs.length)];
+    pick = { id: random.id, ref: random.ref };
+  }
 
   const batch = db.batch();
   batch.update(pick.ref, { status: "current" });
@@ -63,6 +73,7 @@ export async function drawNextPlayer(leagueId: string) {
     timerEndsAt: null,
     nextPlayerAt: null,
     bidStartsAt: new Date(Date.now() + REVEAL_DURATION_MS).toISOString(),
+    queuedPlayerId: null, // clear after use
   });
   await batch.commit();
 }

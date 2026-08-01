@@ -5,6 +5,7 @@ import { firestore } from "@/lib/firebaseClient";
 import { collection, onSnapshot, orderBy, query, limit } from "firebase/firestore";
 import { positionColor } from "@/lib/utils";
 import type { League, Team, Player, Bid } from "@/lib/types";
+import CommissionerTools from "./CommissionerTools";
 
 // -------- Web Audio helpers --------
 let audioCtx: AudioContext | null = null;
@@ -108,6 +109,7 @@ export default function Auction({ league }: { league: League }) {
   const [advancing, setAdvancing] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [flash, setFlash] = useState<{ text: string; color: string; key: number; size?: "big" } | null>(null);
 
   const [optCurrentBid, setOptCurrentBid] = useState<number | null>(null);
@@ -574,23 +576,44 @@ export default function Auction({ league }: { league: League }) {
 
           {isCommish && (
             <div className="mt-4 space-y-2">
+              {league.queuedPlayerId && (() => {
+                const q = players.find((p) => p.id === league.queuedPlayerId);
+                return q ? (
+                  <div className="bg-amber-50 border border-amber-400 rounded-lg px-3 py-2 text-sm text-amber-900 text-center">
+                    <span className="font-semibold">Next up (queued):</span> {q.name} <span className="text-amber-700">({q.position})</span>
+                  </div>
+                ) : null;
+              })()}
               <div className="flex gap-2">
                 <button onClick={togglePause} disabled={pausing}
-                  className={`flex-1 py-3 rounded-lg font-semibold ${
-                    league.paused ? "bg-green-600 hover:bg-green-500" : "bg-yellow-600 hover:bg-yellow-500"
-                  } disabled:bg-zinc-700`}>
+                  className={`flex-1 py-3 rounded-lg font-semibold text-white shadow ${
+                    league.paused ? "bg-emerald-700 hover:bg-emerald-600" : "bg-amber-600 hover:bg-amber-500"
+                  } disabled:bg-stone-400`}>
                   {league.paused ? "▶ Resume Draft" : "⏸ Pause Draft"}
                 </button>
                 <button onClick={forceNext} disabled={advancing || !canForceDrawNext || league.paused}
                   title={!canForceDrawNext ? "Wait for the current bid to finish (or pause first)" : ""}
-                  className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 py-3 rounded-lg font-semibold">
+                  className="flex-1 bg-amber-700 hover:bg-amber-600 disabled:bg-stone-400 text-white py-3 rounded-lg font-semibold shadow">
                   {advancing ? "Advancing…" : "Draw Next Player"}
                 </button>
               </div>
+              <button onClick={() => setToolsOpen(true)}
+                className="w-full bg-stone-800 hover:bg-stone-700 text-white py-2.5 rounded-lg font-semibold shadow">
+                🛠 Commissioner Tools
+              </button>
               <p className="text-[10px] text-stone-500 text-center">
-                Commissioner controls · Pause blocks new bids · Draw Next only after timer expires
+                Pause blocks bids · Draw Next only after timer expires · Tools = queue player + bid history
               </p>
             </div>
+          )}
+
+          {isCommish && toolsOpen && (
+            <CommissionerTools
+              league={league}
+              players={players}
+              teams={teams}
+              onClose={() => setToolsOpen(false)}
+            />
           )}
 
           <section className="mt-6">
@@ -620,9 +643,9 @@ export default function Auction({ league }: { league: League }) {
               const slots = organizeRoster(won);
               return (
                 <div key={t.id} className="bg-zinc-900 rounded-xl border border-zinc-800 p-2.5">
-                  <div className="flex justify-between items-baseline mb-1.5">
+                  <div className="flex justify-between items-center mb-1.5">
                     <span className="font-semibold text-sm truncate">{t.name}</span>
-                    <span className="text-xs font-mono text-green-400">${t.budgetLeft}</span>
+                    <span className="text-2xl font-mono font-bold text-emerald-400 tabular-nums shrink-0 ml-2">${t.budgetLeft}</span>
                   </div>
                   <RosterSlotList label="QB" slots={slots.QB} isCommish={isCommish} onUndo={undoSale} />
                   <RosterSlotList label="RB" slots={slots.RB} isCommish={isCommish} onUndo={undoSale} />

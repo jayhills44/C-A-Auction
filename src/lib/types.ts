@@ -18,6 +18,9 @@ export interface League {
   // Phase timestamps for the "NEXT PLAYER UP → READY GO" grand transition.
   nextPlayerAt: string | null;  // during 5s pause between players (no currentPlayer)
   bidStartsAt: string | null;   // during 2s "READY GO" reveal (currentPlayer set, no bidding yet)
+  // Commissioner override: if set, drawNextPlayer picks this player next
+  // (instead of a random available player), then clears the field.
+  queuedPlayerId: string | null;
   paused: boolean;
   pausedAt: string | null;      // ISO string when paused (used to freeze timer)
   commissionerId: string;
