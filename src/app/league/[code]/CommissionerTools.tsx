@@ -10,12 +10,13 @@ interface Props {
   players: Player[];
   teams: Team[];
   onClose: () => void;
+  onCloseAndResume: () => Promise<void>;
 }
 
 // Full-screen commissioner tools modal with two sections:
 //   1. Queue Next Player (pick a specific available player to be drafted next)
 //   2. Bid History (search any player, see the full bid trail)
-export default function CommissionerTools({ league, players, teams, onClose }: Props) {
+export default function CommissionerTools({ league, players, teams, onClose, onCloseAndResume }: Props) {
   const [tab, setTab] = useState<"queue" | "history">("queue");
   const [queueSearch, setQueueSearch] = useState("");
   const [historySearch, setHistorySearch] = useState("");
@@ -76,11 +77,17 @@ export default function CommissionerTools({ league, players, teams, onClose }: P
     <div className="fixed inset-0 z-40 bg-black/60 flex items-start md:items-center justify-center overflow-y-auto p-4">
       <div className="bg-white rounded-2xl border-2 border-amber-500/50 shadow-2xl w-full max-w-2xl">
         <div className="flex items-center justify-between p-4 border-b border-stone-200">
-          <h2 className="pub-display text-xl font-bold text-stone-900">Commissioner Tools</h2>
+          <div>
+            <h2 className="pub-display text-xl font-bold text-stone-900">Commissioner Tools</h2>
+            {league.paused && (
+              <div className="text-xs text-amber-800 font-medium mt-0.5">⏸ Auction is paused</div>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="text-stone-500 hover:text-stone-900 text-2xl leading-none"
-            aria-label="Close"
+            aria-label="Close (leave paused)"
+            title="Close (leave paused)"
           >
             ×
           </button>
@@ -233,6 +240,24 @@ export default function CommissionerTools({ league, players, teams, onClose }: P
             </div>
           )}
         </div>
+
+        {/* Footer with resume options */}
+        {league.paused && (
+          <div className="p-4 border-t border-stone-200 flex gap-2 bg-stone-50">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold border-2 border-stone-300 bg-white text-stone-700 hover:bg-stone-100"
+            >
+              Close (leave paused)
+            </button>
+            <button
+              onClick={onCloseAndResume}
+              className="flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold bg-emerald-700 hover:bg-emerald-600 text-white shadow"
+            >
+              ▶ Close &amp; Resume Draft
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

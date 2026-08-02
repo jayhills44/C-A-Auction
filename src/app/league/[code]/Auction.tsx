@@ -110,6 +110,7 @@ export default function Auction({ league }: { league: League }) {
   const [pausing, setPausing] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [pullDist, setPullDist] = useState(0); // px pulled from top for pull-to-refresh
   const [flash, setFlash] = useState<{ text: string; color: string; key: number; size?: "big" } | null>(null);
 
   const [optCurrentBid, setOptCurrentBid] = useState<number | null>(null);
@@ -155,7 +156,8 @@ export default function Auction({ league }: { league: League }) {
     return () => clearInterval(id);
   }, []);
 
-  // Server-time sync
+  // Server-time sync — on mount (burst of 4 samples), every 30s, and every
+  // time the tab returns to foreground (mobile browsers throttle background tabs).
   useEffect(() => {
     let cancelled = false;
     let bestRt = Infinity;
@@ -179,7 +181,90 @@ export default function Auction({ league }: { league: League }) {
         await new Promise((r) => setTimeout(r, 400));
       }
     })();
-    return () => { cancelled = true; };
+    const intervalId = setInterval(() => { bestRt = Infinity; sample(); }, 30_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") { bestRt = Infinity; sample(); }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // Pull-to-refresh: if the user drags down from the top of the page past a
+  // threshold, do a full page reload. Handy bailout when a phone screen looks
+  // stuck ("live" values feel behind). Only activates at the top of the page
+  // so it doesn't hijack normal scrolling.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let startY: number | null = null;
+    const threshold = 90;
+
+    function onTouchStart(e: TouchEvent) {
+      if (window.scrollY > 5) return;
+      if (e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+    }
+    function onTouchMove(e: TouchEvent) {
+      if (startY === null) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy > 0 && window.scrollY <= 5) {
+        // Damp the pull so it feels rubbery rather than 1:1.
+        setPullDist(Math.min(140, dy * 0.55));
+      } else if (dy <= 0) {
+        setPullDist(0);
+      }
+    }
+    function onTouchEnd() {
+      if (startY === null) return;
+      // Read current damped distance from state via closure trick: we can't
+      // easily read state inside effect, so use dataset instead. Simpler:
+      // just check the visual indicator via querying its inline style.
+      const el = document.getElementById("ptr-indicator");
+      const dist = el ? parseFloat(el.dataset.dist || "0") : 0;
+      startY = null;
+      if (dist >= threshold) {
+        setPullDist(140);
+        setTimeout(() => window.location.reload(), 120);
+      } else {
+        setPullDist(0);
+      }
+    }
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.addEventListener("touchend", onTouchEnd);
+    document.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+      document.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
+
+  // Screen wake lock — keep phones from dimming/sleeping during the auction,
+  // which is what triggers mobile browsers to throttle the tab.
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const wl = (navigator as any).wakeLock;
+    if (!wl) return;
+    let sentinel: any = null;
+    let cancelled = false;
+    async function request() {
+      try { sentinel = await wl.request("screen"); } catch {}
+    }
+    request();
+    const onVis = () => {
+      if (!cancelled && document.visibilityState === "visible" && !sentinel) request();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
+      try { sentinel && sentinel.release && sentinel.release(); } catch {}
+    };
   }, []);
 
   // Optimistic overlay cleanup
@@ -454,8 +539,29 @@ export default function Auction({ league }: { league: League }) {
     ? "text-4xl md:text-6xl px-10 py-8"
     : "text-3xl md:text-5xl px-8 py-6";
 
+  const ptrReady = pullDist >= 90;
+
   return (
     <main className="mx-auto max-w-7xl p-4 pb-16 relative">
+      {/* Pull-to-refresh indicator */}
+      <div
+        id="ptr-indicator"
+        data-dist={pullDist}
+        style={{
+          height: `${pullDist}px`,
+          transition: pullDist === 0 ? "height 200ms ease" : "none",
+          overflow: "hidden",
+        }}
+        className="flex items-end justify-center text-stone-600"
+      >
+        {pullDist > 20 && (
+          <div className="pb-2 text-sm font-medium flex items-center gap-2">
+            <span className={`inline-block transition-transform ${ptrReady ? "rotate-180" : ""}`}>⬇</span>
+            {ptrReady ? "Release to refresh" : "Pull to refresh"}
+          </div>
+        )}
+      </div>
+
       {/* Full-screen flash overlay */}
       {flash && (
         <div key={flash.key} className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
@@ -597,9 +703,21 @@ export default function Auction({ league }: { league: League }) {
                   {advancing ? "Advancing…" : "Draw Next Player"}
                 </button>
               </div>
-              <button onClick={() => setToolsOpen(true)}
+              <button
+                onClick={async () => {
+                  // Auto-pause when opening so commissioner can't accidentally
+                  // work on the auction and manage tools at the same time.
+                  if (!league.paused) {
+                    const commissionerId = localStorage.getItem(`commish:${league.roomCode}`);
+                    await fetch("/api/pause", {
+                      method: "POST", headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ roomCode: league.roomCode, commissionerId, pause: true }),
+                    }).catch(() => {});
+                  }
+                  setToolsOpen(true);
+                }}
                 className="w-full bg-stone-800 hover:bg-stone-700 text-white py-2.5 rounded-lg font-semibold shadow">
-                🛠 Commissioner Tools
+                🛠 Commissioner Tools <span className="text-xs opacity-80">(auto-pauses)</span>
               </button>
               <p className="text-[10px] text-stone-500 text-center">
                 Pause blocks bids · Draw Next only after timer expires · Tools = queue player + bid history
@@ -613,6 +731,14 @@ export default function Auction({ league }: { league: League }) {
               players={players}
               teams={teams}
               onClose={() => setToolsOpen(false)}
+              onCloseAndResume={async () => {
+                const commissionerId = localStorage.getItem(`commish:${league.roomCode}`);
+                await fetch("/api/pause", {
+                  method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ roomCode: league.roomCode, commissionerId, pause: false }),
+                }).catch(() => {});
+                setToolsOpen(false);
+              }}
             />
           )}
 
