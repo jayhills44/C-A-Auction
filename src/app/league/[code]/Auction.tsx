@@ -387,6 +387,12 @@ export default function Auction({ league }: { league: League }) {
   // we don't fire retroactive flashes for the whole history.
   const soldSignature = players.filter((p) => p.status === "sold").map((p) => p.id).sort().join(",");
   useEffect(() => {
+    // Wait until the players collection has actually loaded from Firestore.
+    // If we init while `players` is still empty (typical on page load / refresh),
+    // any sales that arrive with the first real snapshot look "brand new" and
+    // fire spurious SOLD flashes.
+    if (players.length === 0) return;
+
     const soldNow = players.filter((p) => p.status === "sold");
 
     if (!soldInitializedRef.current) {
@@ -416,7 +422,7 @@ export default function Auction({ league }: { league: League }) {
       if (soundOn) playSoldTone();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soldSignature]);
+  }, [soldSignature, players.length]);
 
   // Auto-advance on any expired phase timestamp (server-time aware)
   useEffect(() => {
