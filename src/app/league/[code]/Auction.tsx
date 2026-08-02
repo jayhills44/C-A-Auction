@@ -572,9 +572,20 @@ export default function Auction({ league }: { league: League }) {
         )}
       </div>
 
-      {/* Full-screen flash overlay */}
+      {/* Full-screen flash overlay.
+          "big" celebratory flashes (SOLD, NEXT PLAYER UP, READY GO) stay
+          centered — you want everyone to see them.
+          Small in-bid flashes (GOING ONCE/TWICE/LAST CHANCE) get pushed to
+          the lower portion of the screen so they cover Recent Bids, not the
+          bid buttons — no one should ever wonder if a flash is blocking their
+          ability to tap Bid. */}
       {flash && (
-        <div key={flash.key} className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+        <div
+          key={flash.key}
+          className={`fixed inset-0 z-50 flex ${
+            flash.size === "big" ? "items-center" : "items-end pb-32"
+          } justify-center pointer-events-none`}
+        >
           <div className={`${flash.color} ${flashClasses} text-white font-black rounded-2xl shadow-2xl border-4 border-white/40 -rotate-3 animate-pulse`}>
             {flash.text}
           </div>
