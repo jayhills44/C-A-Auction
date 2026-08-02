@@ -460,11 +460,15 @@ export default function Auction({ league }: { league: League }) {
   }, [serverNow, league.status, league.paused, league.timerEndsAt, league.bidStartsAt, league.nextPlayerAt]);
 
   // -------- Bid submission --------
+  // Note: no client-side phase check here. The server is authoritative and
+  // will reject the bid if it truly can't be accepted. Any client-side check
+  // creates false negatives during Firestore load / state transitions
+  // (especially right after a pull-to-refresh).
   async function placeBid(amount: number, retriesLeft = 3): Promise<void> {
     setBidErr("");
-    if (phase !== "bidding") { setBidErr("Bidding hasn't started yet"); return; }
     if (league.paused) { setBidErr("Auction is paused"); return; }
     if (!me || !myTeam) { setBidErr("You haven't joined as a team."); return; }
+    if (!league.currentPlayer) { setBidErr("No player up for bid yet"); return; }
     if (!Number.isInteger(amount) || amount < 1) { setBidErr("Enter a whole number."); return; }
     if (amount > myTeam.budgetLeft) { setBidErr(`Over budget ($${myTeam.budgetLeft})`); return; }
 

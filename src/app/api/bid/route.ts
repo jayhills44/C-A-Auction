@@ -39,11 +39,15 @@ export async function POST(req: Request) {
       if (bid > t.budgetLeft)
         return { err: `Bid exceeds your remaining budget ($${t.budgetLeft})` };
 
+      // If we're still in REVEAL phase (bidStartsAt set, timerEndsAt not yet),
+      // an incoming bid effectively kicks off bidding immediately. Clear
+      // bidStartsAt so the client transitions cleanly.
       const newEnds = new Date(Date.now() + (l.bidTimerSecs || 15) * 1000).toISOString();
       tx.update(leagueRef, {
         currentBid: bid,
         currentWinner: teamId,
         timerEndsAt: newEnds,
+        bidStartsAt: null,
       });
       const bidRef = bidsCol.doc();
       tx.set(bidRef, {
