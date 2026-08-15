@@ -242,16 +242,25 @@ export default function CommissionerTools({ league, players, teams, onClose, onC
                         )}
                         <div className="text-xs text-stone-500">{playerBids.length} bid{playerBids.length === 1 ? "" : "s"}</div>
                       </div>
+                      {playerBids.some((b) => b.voided) && (
+                        <div className="text-[11px] italic text-stone-500 px-2 py-1 bg-amber-50 border-b border-stone-200">
+                          Some bids below are from a prior auction that was undone.
+                        </div>
+                      )}
                       <table className="w-full text-sm">
                         <tbody>
                           {playerBids.map((b, i) => {
                             const t = teams.find((tt) => tt.id === b.teamId);
                             const time = new Date(b.createdAt);
+                            const voided = !!b.voided;
                             return (
-                              <tr key={b.id} className={i % 2 ? "bg-stone-50" : ""}>
+                              <tr key={b.id} className={`${i % 2 ? "bg-stone-50" : ""} ${voided ? "opacity-50" : ""}`}>
                                 <td className="p-2 text-stone-500 tabular-nums text-xs w-8">{i + 1}.</td>
-                                <td className="p-2 text-stone-900">{t?.name || "?"}</td>
-                                <td className="p-2 text-right font-mono font-semibold text-emerald-700">${b.amount}</td>
+                                <td className={`p-2 text-stone-900 ${voided ? "line-through italic" : ""}`}>
+                                  {t?.name || "?"}
+                                  {voided && <span className="ml-2 not-italic no-underline text-[10px] uppercase tracking-wider bg-stone-300 text-stone-700 px-1.5 py-0.5 rounded">voided</span>}
+                                </td>
+                                <td className={`p-2 text-right font-mono font-semibold ${voided ? "text-stone-500 line-through" : "text-emerald-700"}`}>${b.amount}</td>
                                 <td className="p-2 text-right text-xs text-stone-500 tabular-nums">
                                   {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                                 </td>

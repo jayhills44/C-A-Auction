@@ -52,4 +52,5 @@ export interface Bid {
   teamId: string;
   amount: number;
   createdAt: string;
+  voided?: boolean; // true if the sale was later undone
 }

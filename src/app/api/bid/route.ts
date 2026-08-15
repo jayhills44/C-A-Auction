@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { findLeagueByCode } from "@/lib/engine";
+import { publishLeagueChange } from "@/lib/ably";
 
 export const runtime = "nodejs";
 
@@ -60,6 +61,11 @@ export async function POST(req: Request) {
     });
 
     if ("err" in result) return NextResponse.json({ error: result.err }, { status: 400 });
+    // Fire the fast lane: Ably push arrives at other clients ~150ms sooner than
+    // the Firestore realtime listener would. Firestore stays as source of truth.
+    publishLeagueChange(roomCode, "bid", {
+      teamId, amount, bidAt: new Date().toISOString(),
+    });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "unknown" }, { status: 500 });

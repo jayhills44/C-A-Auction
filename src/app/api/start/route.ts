@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { schedulePause, findLeagueByCode } from "@/lib/engine";
+import { publishLeagueChange } from "@/lib/ably";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,7 @@ export async function POST(req: Request) {
 
     await league.ref.update({ status: "active" });
     await schedulePause(league.id);
+    publishLeagueChange(roomCode, "start");
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "unknown" }, { status: 500 });

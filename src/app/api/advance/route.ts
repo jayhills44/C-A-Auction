@@ -5,6 +5,7 @@ import {
   startBidding,
   findLeagueByCode,
 } from "@/lib/engine";
+import { publishLeagueChange } from "@/lib/ably";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,8 @@ export async function POST(req: Request) {
     const revealElapsed = league.data.bidStartsAt && new Date(league.data.bidStartsAt).getTime() <= now;
 
     // Commissioner force: run the appropriate next step regardless of timer (but not mid-bid).
+    let didTransition: string | null = null;
+
     if (force) {
       if (league.data.commissionerId !== commissionerId)
         return NextResponse.json({ error: "Only the commissioner can force" }, { status: 403 });
@@ -36,26 +39,30 @@ export async function POST(req: Request) {
       }
       if (league.data.currentPlayer && league.data.timerEndsAt && timerExpired) {
         await finalizeAndScheduleNext(league.id);
+        didTransition = "finalize";
       } else if (league.data.currentPlayer && league.data.bidStartsAt) {
         await startBidding(league.id);
+        didTransition = "start-bid";
       } else if (!league.data.currentPlayer) {
         await drawNextPlayer(league.id);
+        didTransition = "draw-next";
       }
-      return NextResponse.json({ ok: true });
+    } else {
+      // Non-force normal path: only progresses when a phase timer has elapsed.
+      if (timerExpired && league.data.currentPlayer) {
+        await finalizeAndScheduleNext(league.id);
+        didTransition = "finalize";
+      } else if (pauseElapsed && !league.data.currentPlayer) {
+        await drawNextPlayer(league.id);
+        didTransition = "draw-next";
+      } else if (revealElapsed && league.data.currentPlayer && !league.data.timerEndsAt) {
+        await startBidding(league.id);
+        didTransition = "start-bid";
+      }
     }
 
-    // Non-force normal path: only progresses when a phase timer has elapsed.
-    if (timerExpired && league.data.currentPlayer) {
-      await finalizeAndScheduleNext(league.id);
-      return NextResponse.json({ ok: true });
-    }
-    if (pauseElapsed && !league.data.currentPlayer) {
-      await drawNextPlayer(league.id);
-      return NextResponse.json({ ok: true });
-    }
-    if (revealElapsed && league.data.currentPlayer && !league.data.timerEndsAt) {
-      await startBidding(league.id);
-      return NextResponse.json({ ok: true });
+    if (didTransition) {
+      publishLeagueChange(roomCode, "phase", { transition: didTransition });
     }
     return NextResponse.json({ ok: true });
   } catch (e: any) {

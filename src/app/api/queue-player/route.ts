@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { findLeagueByCode } from "@/lib/engine";
+import { publishLeagueChange } from "@/lib/ably";
 
 export const runtime = "nodejs";
 
@@ -27,6 +28,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Player is not available (status: ${p.status})` }, { status: 400 });
 
     await league.ref.update({ queuedPlayerId: String(playerId) });
+    publishLeagueChange(roomCode, "queue", { playerId });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "unknown" }, { status: 500 });
