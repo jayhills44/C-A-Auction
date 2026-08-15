@@ -29,68 +29,101 @@ export async function schedulePause(leagueId: string) {
 
 // Pick the next player and enter the REVEAL phase. If the league has a
 // queuedPlayerId set (commissioner override), use that instead of random.
+//
+// CRITICAL: this runs inside a Firestore transaction because ALL connected
+// clients typically fire /api/advance simultaneously at the end of the pause
+// phase. Without a transaction, two calls would each pick a different random
+// player, each mark theirs "current", but only one wins the league's
+// currentPlayer field — leaving the other player orphaned. With a transaction,
+// Firestore serializes concurrent writes and one call aborts+retries, seeing
+// currentPlayer is set and no-oping.
+//
+// We also heal any pre-existing orphans by resetting stray "current" players
+// back to "available" on every draw.
 export async function drawNextPlayer(leagueId: string) {
   const db = adminDb();
   const leagueRef = db.collection("leagues").doc(leagueId);
-  const leagueSnap = await leagueRef.get();
-  if (!leagueSnap.exists) return;
-  const l = leagueSnap.data() as any;
-  if (l.currentPlayer) return; // already drawn
 
-  const availSnap = await leagueRef.collection("players").where("status", "==", "available").get();
-  if (availSnap.empty) {
-    await leagueRef.update({
-      status: "completed",
-      currentPlayer: null,
+  await db.runTransaction(async (tx) => {
+    const leagueSnap = await tx.get(leagueRef);
+    if (!leagueSnap.exists) return;
+    const l = leagueSnap.data() as any;
+    if (l.currentPlayer) return; // another draw already committed
+
+    const availSnap = await tx.get(
+      leagueRef.collection("players").where("status", "==", "available")
+    );
+    const orphanSnap = await tx.get(
+      leagueRef.collection("players").where("status", "==", "current")
+    );
+
+    if (availSnap.empty) {
+      // No players left — heal orphans and mark league complete.
+      for (const doc of orphanSnap.docs) {
+        tx.update(doc.ref, { status: "available" });
+      }
+      tx.update(leagueRef, {
+        status: "completed",
+        currentPlayer: null,
+        currentBid: 0,
+        currentWinner: null,
+        timerEndsAt: null,
+        nextPlayerAt: null,
+        bidStartsAt: null,
+        queuedPlayerId: null,
+      });
+      return;
+    }
+
+    // Commissioner queued a specific player as next? Use it, if still available.
+    let pick: null | { id: string; ref: FirebaseFirestore.DocumentReference } = null;
+    if (l.queuedPlayerId) {
+      const queued = availSnap.docs.find((d) => d.id === l.queuedPlayerId);
+      if (queued) pick = { id: queued.id, ref: queued.ref };
+    }
+    if (!pick) {
+      const docs = availSnap.docs;
+      const random = docs[Math.floor(Math.random() * docs.length)];
+      pick = { id: random.id, ref: random.ref };
+    }
+
+    // Heal any orphaned "current" players (from prior race conditions).
+    for (const doc of orphanSnap.docs) {
+      if (doc.id !== pick.id) {
+        tx.update(doc.ref, { status: "available" });
+      }
+    }
+
+    tx.update(pick.ref, { status: "current" });
+    tx.update(leagueRef, {
+      currentPlayer: pick.id,
       currentBid: 0,
       currentWinner: null,
       timerEndsAt: null,
       nextPlayerAt: null,
-      bidStartsAt: null,
+      bidStartsAt: new Date(Date.now() + REVEAL_DURATION_MS).toISOString(),
       queuedPlayerId: null,
     });
-    return;
-  }
-
-  // Commissioner queued a specific player as next? Use it, if still available.
-  let pick = null as null | { id: string; ref: FirebaseFirestore.DocumentReference };
-  if (l.queuedPlayerId) {
-    const queued = availSnap.docs.find((d) => d.id === l.queuedPlayerId);
-    if (queued) pick = { id: queued.id, ref: queued.ref };
-  }
-  if (!pick) {
-    const docs = availSnap.docs;
-    const random = docs[Math.floor(Math.random() * docs.length)];
-    pick = { id: random.id, ref: random.ref };
-  }
-
-  const batch = db.batch();
-  batch.update(pick.ref, { status: "current" });
-  batch.update(leagueRef, {
-    currentPlayer: pick.id,
-    currentBid: 0,
-    currentWinner: null,
-    timerEndsAt: null,
-    nextPlayerAt: null,
-    bidStartsAt: new Date(Date.now() + REVEAL_DURATION_MS).toISOString(),
-    queuedPlayerId: null, // clear after use
   });
-  await batch.commit();
 }
 
-// Start the bidding timer (REVEAL -> BIDDING).
+// Start the bidding timer (REVEAL -> BIDDING). Uses a transaction so
+// simultaneous /api/advance calls from multiple clients don't each set a
+// timerEndsAt with slightly different times.
 export async function startBidding(leagueId: string) {
   const db = adminDb();
   const leagueRef = db.collection("leagues").doc(leagueId);
-  const snap = await leagueRef.get();
-  if (!snap.exists) return;
-  const l = snap.data() as any;
-  if (!l.currentPlayer) return;
-  if (l.timerEndsAt) return; // already bidding
 
-  await leagueRef.update({
-    timerEndsAt: new Date(Date.now() + (l.bidTimerSecs || 15) * 1000).toISOString(),
-    bidStartsAt: null,
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(leagueRef);
+    if (!snap.exists) return;
+    const l = snap.data() as any;
+    if (!l.currentPlayer) return;
+    if (l.timerEndsAt) return; // already bidding
+    tx.update(leagueRef, {
+      timerEndsAt: new Date(Date.now() + (l.bidTimerSecs || 15) * 1000).toISOString(),
+      bidStartsAt: null,
+    });
   });
 }
 

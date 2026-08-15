@@ -335,8 +335,9 @@ export default function Auction({ league }: { league: League }) {
     const key = league.nextPlayerAt;
     if (nextUpFiredRef.current === key) return;
     nextUpFiredRef.current = key;
-    setFlash({ text: "NEXT PLAYER UP", color: "bg-fuchsia-700", key: Date.now(), size: "big" });
-    window.setTimeout(() => setFlash((f) => (f && f.text === "NEXT PLAYER UP" ? null : f)), 2200);
+    const flashKey = Date.now();
+    setFlash({ text: "NEXT PLAYER UP", color: "bg-fuchsia-700", key: flashKey, size: "big" });
+    window.setTimeout(() => setFlash((f) => (f && f.key === flashKey ? null : f)), 2200);
     if (soundOn) playFanfare();
   }, [phase, league.nextPlayerAt, soundOn]);
 
@@ -346,8 +347,9 @@ export default function Auction({ league }: { league: League }) {
     const key = league.bidStartsAt;
     if (readyGoFiredRef.current === key) return;
     readyGoFiredRef.current = key;
-    setFlash({ text: "READY, GO!", color: "bg-emerald-600", key: Date.now(), size: "big" });
-    window.setTimeout(() => setFlash((f) => (f && f.text === "READY, GO!" ? null : f)), 1500);
+    const flashKey = Date.now();
+    setFlash({ text: "READY, GO!", color: "bg-emerald-600", key: flashKey, size: "big" });
+    window.setTimeout(() => setFlash((f) => (f && f.key === flashKey ? null : f)), 1500);
     if (soundOn) {
       beep(880, 120, 0.35);
       setTimeout(() => beep(1320, 220, 0.4), 130);
@@ -362,8 +364,9 @@ export default function Auction({ league }: { league: League }) {
 
     const timeouts: number[] = [];
     const showFlash = (text: string, color: string) => {
-      setFlash({ text, color, key: Date.now() });
-      window.setTimeout(() => setFlash((f) => (f && f.text === text ? null : f)), 900);
+      const flashKey = Date.now();
+      setFlash({ text, color, key: flashKey });
+      window.setTimeout(() => setFlash((f) => (f && f.key === flashKey ? null : f)), 900);
     };
     const schedule = (secondsBefore: number, text: string, color: string, freq: number, vol: number) => {
       const fireAt = endsAt - secondsBefore * 1000;
@@ -413,12 +416,14 @@ export default function Auction({ league }: { league: League }) {
     for (const p of brandNew) {
       announcedSoldRef.current.add(p.id);
       const t = teams.find((tt) => tt.id === p.soldTo);
+      const flashKey = Date.now();
       if (t && p.soldPrice && p.soldPrice > 0) {
-        setFlash({ text: `SOLD! ${t.name} — $${p.soldPrice}`, color: "bg-green-600", key: Date.now(), size: "big" });
+        setFlash({ text: `SOLD! ${t.name} — $${p.soldPrice}`, color: "bg-green-600", key: flashKey, size: "big" });
       } else {
-        setFlash({ text: `${p.name} — UNSOLD`, color: "bg-stone-600", key: Date.now(), size: "big" });
+        setFlash({ text: `${p.name} — UNSOLD`, color: "bg-stone-600", key: flashKey, size: "big" });
       }
-      window.setTimeout(() => setFlash(null), 1800);
+      // Only clear THIS specific flash. If a newer flash replaced it, leave that one alone.
+      window.setTimeout(() => setFlash((f) => (f && f.key === flashKey ? null : f)), 1800);
       if (soundOn) playSoldTone();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -476,6 +481,7 @@ export default function Auction({ league }: { league: League }) {
     if (!me || !myTeam) { setBidErr("You haven't joined as a team."); return; }
     if (!league.currentPlayer) { setBidErr("No player up for bid yet"); return; }
     if (!Number.isInteger(amount) || amount < 1) { setBidErr("Enter a whole number."); return; }
+    if (amount <= displayedBid) { setBidErr(`Bid must be higher than $${displayedBid}`); return; }
     if (amount > myTeam.budgetLeft) { setBidErr(`Over budget ($${myTeam.budgetLeft})`); return; }
 
     setBidding(true);

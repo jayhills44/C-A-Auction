@@ -73,6 +73,23 @@ export default function CommissionerTools({ league, players, teams, onClose, onC
     setTimeout(() => setMsg(""), 2000);
   }
 
+  async function undoAndReauction(playerId: string, playerName: string) {
+    if (!confirm(`Refund the team, return "${playerName}" to the pool, and queue them as the next player up?`)) return;
+    setSaving(true);
+    setMsg("");
+    const commissionerId = localStorage.getItem(`commish:${league.roomCode}`);
+    const res = await fetch("/api/undo-and-requeue", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ roomCode: league.roomCode, commissionerId, playerId }),
+    });
+    setSaving(false);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) setMsg(j.error || "Could not undo & re-auction");
+    else setMsg(`${playerName} refunded and queued as next up. Tap "Close & Resume" to re-auction.`);
+    setTimeout(() => setMsg(""), 4000);
+  }
+
   return (
     <div className="fixed inset-0 z-40 bg-black/60 flex items-start md:items-center justify-center overflow-y-auto p-4">
       <div className="bg-white rounded-2xl border-2 border-amber-500/50 shadow-2xl w-full max-w-2xl">
@@ -213,6 +230,16 @@ export default function CommissionerTools({ league, players, teams, onClose, onC
                               : "Available"}
                           </div>
                         </div>
+                        {p.status === "sold" && (
+                          <button
+                            onClick={() => undoAndReauction(p.id, p.name)}
+                            disabled={saving}
+                            className="text-[11px] bg-red-700 hover:bg-red-600 text-white px-2.5 py-1.5 rounded font-semibold whitespace-nowrap"
+                            title="Refund the team, return this player to the pool, and queue them as next"
+                          >
+                            ↩ Undo &amp; Re-auction
+                          </button>
+                        )}
                         <div className="text-xs text-stone-500">{playerBids.length} bid{playerBids.length === 1 ? "" : "s"}</div>
                       </div>
                       <table className="w-full text-sm">

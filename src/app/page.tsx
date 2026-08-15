@@ -46,6 +46,7 @@ export default function HomePage() {
 
       <div className="bg-white rounded-2xl p-6 space-y-4 border-2 border-amber-500/30 shadow-lg">
         <h2 className="pub-display text-xl font-bold text-stone-900">Join the auction</h2>
+        <p className="text-xs text-stone-500 -mt-2">Already joined but lost your session? Enter your same team name to rejoin.</p>
         <label className="block">
           <span className="text-sm text-stone-700 font-medium">Room code</span>
           <input
