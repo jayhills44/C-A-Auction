@@ -75,7 +75,15 @@ export default function Lobby({ league }: { league: League }) {
           <p className="text-xs text-stone-500 mt-3 text-center">Only you (the commissioner) see this button.</p>
         </div>
       ) : (
-        <p className="text-center text-stone-600 mt-6 text-sm">Waiting for the commissioner to start the auction…</p>
+        <div className="mt-6 text-center">
+          <p className="text-stone-600 text-sm">Waiting for the commissioner to start the auction…</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-3 text-xs text-amber-800 hover:text-amber-900 underline"
+          >
+            Not moving? Tap to refresh
+          </button>
+        </div>
       )}
     </main>
   );

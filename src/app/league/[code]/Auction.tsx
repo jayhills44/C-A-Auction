@@ -104,7 +104,6 @@ export default function Auction({ league }: { league: League }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [bids, setBids] = useState<Bid[]>([]);
   const [now, setNow] = useState(Date.now());
-  const [myBid, setMyBid] = useState("");
   const [bidErr, setBidErr] = useState("");
   const [bidding, setBidding] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -585,7 +584,7 @@ export default function Auction({ league }: { league: League }) {
       }),
     });
 
-    if (res.ok) { setBidding(false); setMyBid(""); return; }
+    if (res.ok) { setBidding(false); return; }
 
     const j = await res.json().catch(() => ({}));
     const msg: string = j.error || "Bid failed";
@@ -768,18 +767,6 @@ export default function Auction({ league }: { league: League }) {
                     <button onClick={() => placeBid(Math.max(minNextBid, displayedBid + 5))} disabled={bidding || league.paused}
                       className="flex-1 bg-amber-800 hover:bg-amber-700 active:scale-[.98] transition disabled:bg-stone-400 text-white py-4 rounded-lg font-semibold text-lg shadow">
                       +$5
-                    </button>
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      type="number" min={minNextBid} value={myBid}
-                      onChange={(e) => setMyBid(e.target.value)}
-                      placeholder={`Custom (min $${minNextBid})`}
-                      className="flex-1 rounded-lg bg-stone-50 border-2 border-stone-300 px-3 py-3 outline-none focus:border-amber-600 text-stone-900"
-                    />
-                    <button onClick={() => placeBid(Number(myBid))} disabled={bidding || !myBid || league.paused}
-                      className="px-4 bg-emerald-700 hover:bg-emerald-600 disabled:bg-stone-400 text-white rounded-lg font-semibold shadow">
-                      Bid
                     </button>
                   </div>
                   {bidErr && <div className="mt-2 text-red-700 text-sm font-medium">{bidErr}</div>}

@@ -62,7 +62,7 @@ export default function HomePage() {
           <input
             value={team}
             onChange={(e) => setTeam(e.target.value)}
-            placeholder="Jay's Juggernauts"
+            placeholder="BFranks Pooty Stanks"
             maxLength={40}
             className="mt-1 w-full rounded-lg bg-stone-50 border-2 border-stone-300 px-4 py-3 outline-none focus:border-amber-600 text-stone-900"
           />
