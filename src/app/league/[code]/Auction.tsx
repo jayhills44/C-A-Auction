@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import * as Ably from "ably";
 import { firestore } from "@/lib/firebaseClient";
 import { collection, onSnapshot, orderBy, query, limit, getDocs } from "firebase/firestore";
 import { positionColor } from "@/lib/utils";
 import type { League, Team, Player, Bid } from "@/lib/types";
 import CommissionerTools from "./CommissionerTools";
+// NOTE: Ably is loaded via dynamic import inside effects (see below).
+// A top-level `import * as Ably from "ably"` breaks Next.js webpack because
+// the package ships a pre-bundled browser build that can't be re-parsed.
 
 // -------- Web Audio helpers --------
 let audioCtx: AudioContext | null = null;
@@ -157,7 +159,7 @@ export default function Auction({ league }: { league: League }) {
   // still runs and would catch anything Ably missed, so this is additive.
   useEffect(() => {
     const roomCode = league.roomCode;
-    let client: Ably.Realtime | null = null;
+    let client: any = null;
     let channel: any = null;
     let cancelled = false;
 
@@ -168,7 +170,13 @@ export default function Auction({ league }: { league: League }) {
       const tokenRequest = await tokenRes.json();
       if (cancelled) return;
 
-      client = new Ably.Realtime({
+      // Dynamic import so webpack doesn't try to bundle Ably's pre-built
+      // browser bundle at build time.
+      const AblyMod = await import("ably");
+      if (cancelled) return;
+      const Realtime = (AblyMod as any).Realtime;
+
+      client = new Realtime({
         authCallback: (_params: any, cb: any) => cb(null, tokenRequest),
         transports: ["web_socket"],
       });
@@ -195,7 +203,7 @@ export default function Auction({ league }: { league: League }) {
     return () => {
       cancelled = true;
       try { channel && channel.unsubscribe && channel.unsubscribe(); } catch {}
-      try { client && client.close(); } catch {}
+      try { client && client.close && client.close(); } catch {}
     };
   }, [league.id, league.roomCode]);
 

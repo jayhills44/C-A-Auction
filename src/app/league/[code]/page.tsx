@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import * as Ably from "ably";
 import { firestore } from "@/lib/firebaseClient";
 import { collection, getDocs, onSnapshot, query, where, limit } from "firebase/firestore";
 import Lobby from "./Lobby";
 import Auction from "./Auction";
 import Results from "./Results";
 import type { League } from "@/lib/types";
+// Ably loaded via dynamic import inside effects (see below). See Auction.tsx
+// for the same pattern — a top-level import breaks Next.js webpack build.
 
 export default function LeaguePage() {
   const params = useParams<{ code: string }>();
@@ -52,7 +53,7 @@ export default function LeaguePage() {
   // listener silently disconnects on a phone.
   useEffect(() => {
     if (!code) return;
-    let client: Ably.Realtime | null = null;
+    let client: any = null;
     let channel: any = null;
     let cancelled = false;
 
@@ -62,7 +63,11 @@ export default function LeaguePage() {
         if (tokenRes.status === 204 || !tokenRes.ok) return;
         const tokenRequest = await tokenRes.json();
         if (cancelled) return;
-        client = new Ably.Realtime({
+        // Dynamic import — see note at top of file.
+        const AblyMod = await import("ably");
+        if (cancelled) return;
+        const Realtime = (AblyMod as any).Realtime;
+        client = new Realtime({
           authCallback: (_p: any, cb: any) => cb(null, tokenRequest),
           transports: ["web_socket"],
         });
@@ -74,7 +79,7 @@ export default function LeaguePage() {
     return () => {
       cancelled = true;
       try { channel && channel.unsubscribe && channel.unsubscribe(); } catch {}
-      try { client && client.close(); } catch {}
+      try { client && client.close && client.close(); } catch {}
     };
   }, [code, refetch]);
 
