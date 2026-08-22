@@ -7,8 +7,19 @@ import Lobby from "./Lobby";
 import Auction from "./Auction";
 import Results from "./Results";
 import type { League } from "@/lib/types";
-// Ably loaded via dynamic import inside effects (see below). See Auction.tsx
-// for the same pattern — a top-level import breaks Next.js webpack build.
+// Ably loaded via <script> tag in layout.tsx (window.Ably). See Auction.tsx
+// for the same pattern — we NEVER `import` Ably in a client component or
+// Next.js's webpack chokes trying to re-parse the pre-built browser bundle.
+
+async function waitForAbly(): Promise<any> {
+  for (let i = 0; i < 40; i++) {
+    if (typeof window !== "undefined" && (window as any).Ably) {
+      return (window as any).Ably;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+}
 
 export default function LeaguePage() {
   const params = useParams<{ code: string }>();
@@ -63,11 +74,9 @@ export default function LeaguePage() {
         if (tokenRes.status === 204 || !tokenRes.ok) return;
         const tokenRequest = await tokenRes.json();
         if (cancelled) return;
-        // Dynamic import — see note at top of file.
-        const AblyMod = await import("ably");
-        if (cancelled) return;
-        const Realtime = (AblyMod as any).Realtime;
-        client = new Realtime({
+        const Ably = await waitForAbly();
+        if (cancelled || !Ably) return;
+        client = new Ably.Realtime({
           authCallback: (_p: any, cb: any) => cb(null, tokenRequest),
           transports: ["web_socket"],
         });

@@ -6,9 +6,21 @@ import { collection, onSnapshot, orderBy, query, limit, getDocs } from "firebase
 import { positionColor } from "@/lib/utils";
 import type { League, Team, Player, Bid } from "@/lib/types";
 import CommissionerTools from "./CommissionerTools";
-// NOTE: Ably is loaded via dynamic import inside effects (see below).
-// A top-level `import * as Ably from "ably"` breaks Next.js webpack because
-// the package ships a pre-bundled browser build that can't be re-parsed.
+// NOTE: Ably is loaded via a <script> tag in layout.tsx pointing at their CDN.
+// We reach for `window.Ably` at runtime — never via an `import` — so webpack
+// doesn't try to bundle Ably's pre-built browser file (which chokes on
+// downlevel `super(...)` syntax when Next re-parses it).
+
+// Wait up to ~2s for the CDN script to make window.Ably available.
+async function waitForAbly(): Promise<any> {
+  for (let i = 0; i < 40; i++) {
+    if (typeof window !== "undefined" && (window as any).Ably) {
+      return (window as any).Ably;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+}
 
 // -------- Web Audio helpers --------
 let audioCtx: AudioContext | null = null;
@@ -170,13 +182,10 @@ export default function Auction({ league }: { league: League }) {
       const tokenRequest = await tokenRes.json();
       if (cancelled) return;
 
-      // Dynamic import so webpack doesn't try to bundle Ably's pre-built
-      // browser bundle at build time.
-      const AblyMod = await import("ably");
-      if (cancelled) return;
-      const Realtime = (AblyMod as any).Realtime;
+      const Ably = await waitForAbly();
+      if (cancelled || !Ably) return;
 
-      client = new Realtime({
+      client = new Ably.Realtime({
         authCallback: (_params: any, cb: any) => cb(null, tokenRequest),
         transports: ["web_socket"],
       });
